@@ -1,0 +1,12 @@
+# API-Keys und Geheimnisse – niemals hochladen
+.env
+
+
+# Python temporäre Dateien
+__pycache__/
+*.pyc
+
+
+# VS Code Einstellungen
+.vscode/
+
