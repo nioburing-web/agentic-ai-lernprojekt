@@ -69,7 +69,11 @@ Hier können Sie direkt einen Termin buchen:
 Ich freue mich auf unser Gespräch!
 
 
-Mit freundlichen Grüßen"""
+Mit freundlichen Grüßen
+Nio Buering
+AI Automation Specialist
++49 123 456789
+"""
 
 
         erfolg = sende_email(TEST_EMAIL,
@@ -87,7 +91,10 @@ Ich respektiere Ihre Entscheidung und melde mich nicht mehr.
 Sollte sich Ihre Situation ändern, stehe ich gerne zur Verfügung.
 
 
-Mit freundlichen Grüßen"""
+Mit freundlichen Grüßen
+Nio Buering
+AI Automation Specialist
++49 123 456789"""
 
 
         erfolg = sende_email(TEST_EMAIL,
