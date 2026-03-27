@@ -17,5 +17,6 @@ ergebnis = 7 * 6
 print(f"7 × 6 = {ergebnis}")
 
 # Test: Läuft Python 3.11?
+
 import sys
 print(f"Python-Version: {sys.version}")

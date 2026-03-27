@@ -67,7 +67,7 @@ Nur der E-Mail-Text, kein Betreff. Keine Signatur.
 
 # ── Funktion 3: E-Mail senden ─────────────────
 def sende_email(an, betreff, text):
-    signatur = "\nNio Büring\nAI Automation Specialist\nnio.buring@gmail.com"
+    signatur = "\nNio Büring\nAI Automation Specialist\nnioburing@gmail.com"
     r = requests.post(
         f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
         auth=("api", MAILGUN_API_KEY),
