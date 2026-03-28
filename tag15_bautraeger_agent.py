@@ -158,14 +158,23 @@ Antworte NUR mit einem dieser vier Woerter: INTERESSE, ABLEHNUNG, FRAGE oder ABW
 
 # ── Funktion 4: E-Mail senden ─────────────────
 def sende_email(an, betreff, text):
-    signatur = "\n\nMit freundlichen Gruessen\nNio Buering\nnioburing@gmail.com"  # <-- Anpassen
-    r = requests.post(
-        f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
-        auth=("api", MAILGUN_API_KEY),
-        data={"from": f"Immobilien Anfrage <mailgun@{MAILGUN_DOMAIN}>",
-              "to": [an], "subject": betreff, "text": text + signatur}
+    signatur = (
+        f"\n\nMit freundlichen Gruessen\n"
+        f"{os.environ.get('ABSENDER_NAME')}\n"
+        f"NIO Automation\n"
+        f"Tel: {os.environ.get('ABSENDER_TEL')}\n"
+        f"{os.environ.get('ABSENDER_EMAIL')}"
     )
-    return r.status_code == 200
+    r = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={"api-key": os.environ.get("BREVO_API_KEY"),
+                 "Content-Type": "application/json"},
+        json={"sender": {"name": "NIO Automation", "email": "anfragen@nio-automation.de"},
+              "to": [{"email": an}],
+              "subject": betreff,
+              "textContent": text + signatur}
+    )
+    return r.status_code == 201
 
 
 # ── Funktion 4: Ins Sheet schreiben ──────────
