@@ -170,6 +170,7 @@ def sende_email(an, betreff, text):
         headers={"api-key": os.environ.get("BREVO_API_KEY"),
                  "Content-Type": "application/json"},
         json={"sender": {"name": "NIO Automation", "email": "anfragen@nio-automation.de"},
+              "replyTo": {"email": os.environ.get("REPLY_EMAIL")},
               "to": [{"email": an}],
               "subject": betreff,
               "textContent": text + signatur}
