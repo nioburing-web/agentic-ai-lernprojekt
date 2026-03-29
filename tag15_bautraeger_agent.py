@@ -332,6 +332,32 @@ def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str):
     return kategorie
 
 
+# ── Duplikat-Schutz ──────────────────────────
+def ist_bereits_kontaktiert(sheet, firma: str) -> bool:
+    """
+    Prueft ob ein Bautraeger bereits im Sheet steht UND
+    den Status KONTAKTIERT oder GEANTWORTET hat.
+    Gibt True zurueck wenn uebersprungen werden soll.
+    """
+    try:
+        treffer = sheet.findall(firma)
+        if not treffer:
+            return False  # Nicht im Sheet → neu eintragen
+
+        for zelle in treffer:
+            zeile_nr = zelle.row
+            status = sheet.cell(zeile_nr, 6).value  # Spalte F = Status
+            if status in ("KONTAKTIERT", "GEANTWORTET"):
+                print(f"[SKIP] {firma} – bereits kontaktiert (Status: {status}). Wird übersprungen.")
+                return True
+
+        return False  # Im Sheet aber kein KONTAKTIERT-Status → neu eintragen
+
+    except Exception as e:
+        print(f"[WARNUNG] Duplikat-Pruefung fuer {firma} fehlgeschlagen: {e}")
+        return False  # Im Zweifel lieber nicht überspringen
+
+
 # ── Haupt-Loop ────────────────────────────────
 df = pd.read_csv("bautraeger.csv", index_col=False)
 print(f"Agent startet – {len(df)} Bauträger gefunden.")
@@ -343,6 +369,11 @@ print()
 
 for index, firma in df.iterrows():
     print(f"[{int(index)+1}/{len(df)}] {firma['firma']} – {firma['region']}")
+
+    # ── DUPLIKAT-SCHUTZ ─────────────────────────────────────────
+    if not TEST_MODUS and sheet is not None and ist_bereits_kontaktiert(sheet, firma["firma"]):
+        continue  # Überspringen – kein doppelter Eintrag
+    # ────────────────────────────────────────────────────────────
 
     score = bewerte_bautraeger(firma)
     time.sleep(1)
