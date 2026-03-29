@@ -137,35 +137,45 @@ def generate_email(
 ) -> dict:
     neubau_text = "ausschließlich Neubauprojekte" if nur_neubau else "Neubau oder Bestand"
 
-    prompt = f"""Schreibe eine professionelle Anfrage-E-Mail an den Bautraeger
+    prompt = f"""Schreibe eine kurze lockere Anfrage-E-Mail an den Bautraeger
 "{bautraeger_name}" in der Region {region}.
 
+
+KONTEXT:
+Ich entwickle ein KI-System das automatisch passende Neubauwohnungen
+fuer Kaufinteressenten findet. Ich brauche echte Beispielobjekte
+um das System zu testen und zu verbessern.
+
+
+ZIEL DER E-MAIL:
+Hoeflich und locker fragen ob der Bautraeger kurz Zeit haette,
+uns ein aktuelles Neubauobjekt zu zeigen das zu diesen Kriterien passt:
+- Region: {region}
+- Budget: bis {budget} Euro
+- Zimmeranzahl: {zimmer} Zimmer
+- Wohnflaeche: {wohnflaeche_min}-{wohnflaeche_max} qm
+- Nur Neubau: {neubau_text}
+
+
 STRUKTUR:
-1. Anrede: "Sehr geehrtes Team von {bautraeger_name},"
-2. Erster Satz – Unternehmensvorstellung:
-   "NIO Automation ist ein KI-gestuetzter Immobilien-Suchservice, der
-   qualifizierte Kaufinteressenten direkt mit passenden Bautraegern verbindet."
-3. Suchkriterien des Kunden (alle nennen):
-   - Region: {region}
-   - Budget: bis {budget:,} Euro
-   - Zimmeranzahl: {zimmer} Zimmer
-   - Wohnflaeche: {wohnflaeche_min}–{wohnflaeche_max} qm
-   - Objekttyp: {neubau_text}
-   - Ausstattung: Grosse Kueche und Keller vorhanden
-4. Bitte um Rueckmeldung innerhalb von 5 Werktagen
-5. Signatur: NIO Automation | anfragen@nio-automation.de | nio-automation.de
+1. Anrede: Sehr geehrtes Team von {bautraeger_name},
+2. Ich-Perspektive: 'Ich entwickle gerade ein KI-System...'
+3. Konkrete Bitte: Haetten Sie Zeit uns ein passendes Objekt zu zeigen?
+4. Suchkriterien kurz nennen
+5. Bitte nett und freundlich um kurze Rueckmeldung bitten
 
 PFLICHTREGELN:
-- Korrekte deutsche Gross- und Kleinschreibung
-- Region IMMER grossschreiben (Hamburg, Nordsee, Ostsee, Mallorca)
-- KEIN "Sehr geehrte Damen und Herren"
-- Maximal 160 Woerter
-- Professioneller aber persoenlicher Ton
+- Korrekte Gross-/Kleinschreibung
+- Region grossschreiben (Hamburg, Nordsee, Ostsee, Mallorca)
+- Locker und persoenlich – kein Unternehmens-Sprech
+- KEIN 'Sehr geehrte Damen und Herren'
+- KEINE Kaufversprechen oder Kaufabsichten
+- KEINE Verabschiedung (kein 'Mit freundlichen Grüßen', 'Viele Grüße', 'Beste Grüße' o.ä.)
+- Max. 120 Woerter
+- Betreff muss das KI-Projekt erwaehnen (z.B. 'KI-Projekt' oder 'KI-Wohnungssuche')
 
-FORMAT – gib NUR das zurueck:
-BETREFF: [Betreff hier]
 
-[E-Mail Text hier]"""
+FORMAT: BETREFF: [Betreff]\n\n[E-Mail Text]"""
 
     try:
         r = client.chat.completions.create(
@@ -191,7 +201,7 @@ BETREFF: [Betreff hier]
         body = "\n".join(body_zeilen).strip()
 
         if not betreff:
-            betreff = f"Anfrage: Eigentumswohnung in {region}"
+            betreff = f"KI-Projekt: Neubauobjekt in {region} gesucht"
         if not body:
             body = antwort
 
@@ -246,18 +256,15 @@ Antworte NUR mit einem dieser vier Wörter: INTERESSE, ABLEHNUNG, FRAGE oder ABW
 # ── Funktion 4: E-Mail senden ──────────────────
 def sende_email(an, betreff, text):
     signatur = (
-        f"\n\nMit freundlichen Grüßen\n"
-        f"{os.environ.get('ABSENDER_NAME')}\n"
-        f"NIO Automation\n"
-        f"Tel: {os.environ.get('ABSENDER_TEL')}\n"
-        f"{os.environ.get('ABSENDER_EMAIL')}"
+        "\n\nNIO Automation\n"
+        "anfragen@nio-automation.de | nio-automation.de"
     )
     try:
         r = requests.post(
             "https://api.brevo.com/v3/smtp/email",
             headers={"api-key": os.environ.get("BREVO_API_KEY"),
                      "Content-Type": "application/json"},
-            json={"sender":    {"name": "NIO Automation", "email": "anfragen@nio-automation.de"},
+            json={"sender":    {"name": os.environ.get("ABSENDER_NAME"), "email": os.environ.get("ABSENDER_EMAIL")},
                   "replyTo":   {"email": os.environ.get("REPLY_EMAIL")},
                   "to":        [{"email": an}],
                   "subject":   betreff,
@@ -390,11 +397,13 @@ for index, firma in df.iterrows():
 
         print(f"\n   --- Generierte E-Mail ---")
         print(f"   Betreff: {email_dict['subject']}")
-        print(f"   Text:\n{email_dict['body']}")
+        signatur_vorschau = "\n\nNIO Automation\nanfragen@nio-automation.de | nio-automation.de"
+        print(f"   Text:\n{email_dict['body']}{signatur_vorschau}")
         print(f"   -------------------------\n")
 
         if TEST_MODUS:
             print(f"   Score {score}/10 → [TEST-MODUS] E-Mail nicht gesendet")
+            print(f"   Absender: {os.environ.get('ABSENDER_EMAIL')} → Empfaenger: {firma['email']}")
             print(f"   Sheet-Eintrag (simuliert):")
             print(f"   {[firma['firma'], firma['email'], firma['region'], firma['stadt'], score, 'KONTAKTIERT', datetime.now().strftime('%Y-%m-%d %H:%M'), '', '', '', '']}")
         else:
