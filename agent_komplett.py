@@ -25,11 +25,32 @@ gc     = gspread.authorize(creds)
 sheet  = gc.open_by_key(SHEET_ID).sheet1
 
 
-# Spaltenkoepfe setzen
-headers = ["Name","Firma","Branche","Score","Status","E-Mail generiert","Gesendet am","Notizen"]
+# ── Aufgabe 1: Header-Prüfung ─────────────────
+LEAD_HEADERS = ["Name", "Firma", "Branche", "Score",
+                "Status", "E-Mail generiert", "Gesendet am", "Notizen"]
 
-if not sheet.get_all_values():
-    sheet.append_row(headers)
+def ensure_lead_headers(sheet):
+    """Prueft und ergaenzt Header-Zeile im Lead-Qualifier-Dashboard."""
+    try:
+        aktuelle = sheet.row_values(1)
+    except Exception:
+        aktuelle = []
+
+    if not aktuelle:
+        sheet.insert_row(LEAD_HEADERS, 1)
+        print("[INFO] Lead-Dashboard: Header neu erstellt.")
+        return
+
+    fehlende = [h for h in LEAD_HEADERS if h not in aktuelle]
+    if fehlende:
+        naechste = len(aktuelle) + 1
+        for i, h in enumerate(fehlende):
+            sheet.update_cell(1, naechste + i, h)
+        print(f"[INFO] Lead-Dashboard: Neue Spalten ergaenzt: {fehlende}")
+    else:
+        print("[INFO] Lead-Dashboard: Header vollstaendig.")
+
+ensure_lead_headers(sheet)
 
 
 # ── Funktion 1: Lead bewerten ─────────────────
@@ -75,6 +96,34 @@ def sende_email(an, betreff, text):
               "to": [an], "subject": betreff, "text": text + signatur}
     )
     return r.status_code == 200
+
+
+# ── Aufgabe 3: update_lead_sheet() ───────────
+def update_lead_sheet(sheet, name: str, firma: str, branche: str,
+                      score: int, status: str, email_generiert: bool = False):
+    """
+    Fuegt eine neue Zeile im Lead-Qualifier-Dashboard ein.
+    8 Spalten: A–H wie in LEAD_HEADERS definiert.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    email_generiert_text = "Ja" if email_generiert else "Nein"
+
+    zeile = [
+        name,                                          # A: Name
+        firma,                                         # B: Firma
+        branche,                                       # C: Branche
+        score,                                         # D: Score
+        status,                                        # E: Status (TOP/MITTEL/NIEDRIG)
+        email_generiert_text,                          # F: E-Mail generiert
+        timestamp if email_generiert else "",          # G: Gesendet am ← Feedback Punkt 8
+        ""                                             # H: Notizen
+    ]
+
+    try:
+        sheet.append_row(zeile)
+        print(f"[{timestamp}] Lead eingetragen: {name} | {firma} | Score: {score} | {status}")
+    except Exception as e:
+        print(f"[FEHLER] Lead-Sheet fuer {name}: {e}")
 
 
 # ── Funktion 4: Ins Sheet schreiben ──────────

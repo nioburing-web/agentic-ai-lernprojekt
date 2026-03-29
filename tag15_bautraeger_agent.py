@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import os
+import sys
 import pandas as pd
 import requests
 import gspread
@@ -12,8 +13,16 @@ import time
 load_dotenv()
 client  = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-SHEET_ID  = "1LBEp_m5-8SGaB5vWjeuq12CK2N4Q8vBjsSzXZ5ZoKFQ"
-DRY_RUN   = True   # Auf False setzen um E-Mails wirklich zu senden
+SHEET_ID = "1LBEp_m5-8SGaB5vWjeuq12CK2N4Q8vBjsSzXZ5ZoKFQ"
+
+# ── Test-Modus ────────────────────────────────
+TEST_MODUS = "--test" in sys.argv
+
+if TEST_MODUS:
+    print("=" * 55)
+    print("[TEST-MODUS] Keine E-Mails werden gesendet!")
+    print("[TEST-MODUS] Sheets werden nicht aktualisiert.")
+    print("=" * 55)
 
 
 # ── Suchkriterien des Kunden ──────────────────
@@ -27,6 +36,13 @@ KRITERIEN = """
 - Ausstattung: Große Küche, Keller vorhanden
 """
 
+# ── Sheet-Header (Aufgabe 1) ──────────────────
+BAUTRAEGER_HEADERS = [
+    "Firma", "E-Mail", "Region", "Stadt", "Score", "Status",
+    "Anfrage gesendet am", "Antwort am", "Antwort-Kategorie",
+    "Termin (Calendly)", "Notizen"
+]
+
 
 # ── Google Sheets Verbindung ──────────────────
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
@@ -36,14 +52,33 @@ try:
     creds  = Credentials.from_service_account_file(credentials_pfad, scopes=SCOPES)
     gc     = gspread.authorize(creds)
     sheet  = gc.open_by_key(SHEET_ID).sheet1
-    HEADERS = ["bautraeger_name", "region", "status", "email_subject",
-               "email_gesendet_am", "antwort_erhalten_am", "termin_calendly", "notizen"]
-    sheet.clear()
-    sheet.append_row(HEADERS)
     print("Google Sheets Verbindung erfolgreich.")
 except Exception as e:
     print(f"FEHLER: Google Sheets Verbindung fehlgeschlagen ({e})")
     sheet = None
+
+
+# ── Aufgabe 1: Header-Prüfung ─────────────────
+def ensure_bautraeger_headers(sheet):
+    """Prueft und ergaenzt Header-Zeile im Bautraeger-Dashboard."""
+    try:
+        aktuelle = sheet.row_values(1)
+    except Exception:
+        aktuelle = []
+
+    if not aktuelle:
+        sheet.insert_row(BAUTRAEGER_HEADERS, 1)
+        print("[INFO] Bautraeger-Dashboard: Header neu erstellt.")
+        return
+
+    fehlende = [h for h in BAUTRAEGER_HEADERS if h not in aktuelle]
+    if fehlende:
+        naechste = len(aktuelle) + 1
+        for i, h in enumerate(fehlende):
+            sheet.update_cell(1, naechste + i, h)
+        print(f"[INFO] Bautraeger-Dashboard: Neue Spalten ergaenzt: {fehlende}")
+    else:
+        print("[INFO] Bautraeger-Dashboard: Header vollstaendig.")
 
 
 # ── Funktion 1: Bauträger bewerten ────────────
@@ -90,37 +125,48 @@ Antworte NUR mit einer Zahl zwischen 1 und 10.
         return 5
 
 
-# ── Funktion 2: E-Mail generieren ─────────────
-def generate_email(bautraeger_name: str, region: str,
-                   zimmer_min: int = 3, zimmer_max: int = 4,
-                   wohnflaeche_min: int = 70, wohnflaeche_max: int = 100,
-                   nur_neubau: bool = True) -> dict:
-    neubau_text = "Ja" if nur_neubau else "Nein"
-    prompt = f"""
-Schreibe eine professionelle Anfrage-E-Mail auf Deutsch an den Bauträger "{bautraeger_name}" in der Region {region}.
+# ── Aufgabe 5: E-Mail generieren (neuer Prompt) ──
+def generate_email(
+    bautraeger_name: str,
+    region: str,
+    zimmer: int = 3,                  # Feedback: Zimmeranzahl statt Schlafzimmer
+    wohnflaeche_min: int = 70,        # Feedback: Wohnfläche min
+    wohnflaeche_max: int = 100,       # Feedback: Wohnfläche max
+    budget: int = 400000,
+    nur_neubau: bool = True           # Feedback: Nur Neubau als Ja/Nein
+) -> dict:
+    neubau_text = "ausschließlich Neubauprojekte" if nur_neubau else "Neubau oder Bestand"
 
-Verwende folgende Struktur:
-1. Betreff in der ersten Zeile im Format: BETREFF: [Betreff]
-2. Eine Leerzeile
-3. Den E-Mail-Text
+    prompt = f"""Schreibe eine professionelle Anfrage-E-Mail an den Bautraeger
+"{bautraeger_name}" in der Region {region}.
 
-Inhalt der E-Mail:
-- Beginne mit: "NIO Automation ist ein KI-gestützter Immobilien-Suchservice, der qualifizierte Kaufinteressenten mit passenden Bauträgern verbindet."
-- Persönliche Anrede mit dem Bauträgernamen
-- Wir suchen für einen Kunden folgende Immobilie:
-  * Zimmeranzahl: {zimmer_min}–{zimmer_max} Zimmer
-  * Wohnfläche: {wohnflaeche_min}–{wohnflaeche_max} qm
-  * Budget: bis 400.000 Euro
-  * Nur Neubau: {neubau_text}
-  * Ausstattung: Große Küche, Keller vorhanden
-  * Region: {region}
-- Fragen ob der Bauträger aktuell oder in naher Zukunft passende Einheiten anbietet
-- Bitte um Rückmeldung innerhalb von 5 Werktagen
-- Maximale Länge: 150 Wörter
-- Professionell, höflich, korrekte deutsche Groß- und Kleinschreibung
-- Schließe mit der Signatur ab: "NIO Automation | anfragen@nio-automation.de | nio-automation.de"
-- Keine zusätzliche Grußformel nach der Signatur
-"""
+STRUKTUR:
+1. Anrede: "Sehr geehrtes Team von {bautraeger_name},"
+2. Erster Satz – Unternehmensvorstellung:
+   "NIO Automation ist ein KI-gestuetzter Immobilien-Suchservice, der
+   qualifizierte Kaufinteressenten direkt mit passenden Bautraegern verbindet."
+3. Suchkriterien des Kunden (alle nennen):
+   - Region: {region}
+   - Budget: bis {budget:,} Euro
+   - Zimmeranzahl: {zimmer} Zimmer
+   - Wohnflaeche: {wohnflaeche_min}–{wohnflaeche_max} qm
+   - Objekttyp: {neubau_text}
+   - Ausstattung: Grosse Kueche und Keller vorhanden
+4. Bitte um Rueckmeldung innerhalb von 5 Werktagen
+5. Signatur: NIO Automation | anfragen@nio-automation.de | nio-automation.de
+
+PFLICHTREGELN:
+- Korrekte deutsche Gross- und Kleinschreibung
+- Region IMMER grossschreiben (Hamburg, Nordsee, Ostsee, Mallorca)
+- KEIN "Sehr geehrte Damen und Herren"
+- Maximal 160 Woerter
+- Professioneller aber persoenlicher Ton
+
+FORMAT – gib NUR das zurueck:
+BETREFF: [Betreff hier]
+
+[E-Mail Text hier]"""
+
     try:
         r = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -155,11 +201,12 @@ Inhalt der E-Mail:
         print(f"   FEHLER: E-Mail konnte nicht generiert werden ({e})")
         return {
             "subject": f"Anfrage: Eigentumswohnung in {region}",
-            "body": f"Sehr geehrte Damen und Herren,\n\nwir suchen für einen Kunden eine Neubauwohnung in {region}.\n\nNIO Automation | anfragen@nio-automation.de | nio-automation.de"
+            "body": f"Sehr geehrtes Team von {bautraeger_name},\n\nwir suchen für einen Kunden eine Neubauwohnung in {region}.\n\nNIO Automation | anfragen@nio-automation.de | nio-automation.de"
         }
 
 
 # ── Funktion 3: Antwort klassifizieren ────────
+# NICHT VERÄNDERN
 GUELTIGE_KATEGORIEN = {"INTERESSE", "ABLEHNUNG", "FRAGE", "ABWESENHEIT"}
 
 def klassifiziere_antwort(antwort_text):
@@ -222,57 +269,77 @@ def sende_email(an, betreff, text):
         return False
 
 
-# ── Funktion 5: Ins Sheet schreiben ───────────
-def schreibe_ins_sheet(bautraeger_name, region, status, email_subject, gesendet=False):
-    if sheet is None:
-        print("   WARNUNG: Kein Sheet verfügbar, überspringe Eintrag.")
-        return
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M") if gesendet else ""
+# ── Aufgabe 2: update_bautraeger_sheet() ─────────
+def update_bautraeger_sheet(sheet, firma: str, email: str, region: str,
+                             stadt: str, score: int, status: str):
+    """
+    Fuegt eine neue Zeile im Bautraeger-Dashboard ein.
+    11 Spalten: A–K wie in BAUTRAEGER_HEADERS definiert.
+    Feedback eingebaut: Anfrage gesendet am (G), Antwort am (H, leer),
+    Antwort-Kategorie (I, leer), Termin Calendly (J, leer), Notizen (K, leer)
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
     zeile = [
-        bautraeger_name,
-        region,
-        status,
-        email_subject,
-        timestamp,   # email_gesendet_am
-        "",          # antwort_erhalten_am
-        "",          # termin_calendly
-        ""           # notizen
+        firma,      # A: Firma
+        email,      # B: E-Mail
+        region,     # C: Region
+        stadt,      # D: Stadt
+        score,      # E: Score (von bewerte_bautraeger())
+        status,     # F: Status
+        timestamp,  # G: Anfrage gesendet am ← Feedback Punkt 8
+        "",         # H: Antwort am ← Feedback Punkt 6 (wird durch klassifiziere_antwort befüllt)
+        "",         # I: Antwort-Kategorie (wird durch klassifiziere_antwort befüllt)
+        "",         # J: Termin (Calendly) ← Feedback Punkt 7
+        ""          # K: Notizen
     ]
+
     try:
         sheet.append_row(zeile)
-        print(f"   [{datetime.now().strftime('%Y-%m-%d %H:%M')}] Sheet aktualisiert: {bautraeger_name}")
+        print(f"[{timestamp}] Bautraeger eingetragen: {firma} | Score: {score} | {status}")
     except Exception as e:
-        print(f"   FEHLER: Sheet konnte nicht beschrieben werden ({e})")
+        print(f"[FEHLER] Bautraeger-Sheet fuer {firma}: {e}")
 
 
-# ── Funktion 6: Antwort im Sheet aktualisieren ─
-def update_antwort_im_sheet(firma_name, kategorie):
-    if sheet is None:
-        return False
+# ── Aufgabe 4: verarbeite_bautraeger_antwort() ───
+def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str):
+    """
+    Klassifiziert eine Bautraeger-Antwort und aktualisiert das Sheet.
+    Nutzt klassifiziere_antwort() – wird NICHT veraendert.
+
+    Aktualisiert:
+    - Spalte H (Antwort am): Zeitstempel ← Feedback Punkt 6
+    - Spalte I (Antwort-Kategorie): Klassifikation durch klassifiziere_antwort()
+    - Spalte F (Status): wird auf "GEANTWORTET" gesetzt
+    """
+    # Bestehenden Reply-Classifier aufrufen – NICHT veraendern
+    kategorie = klassifiziere_antwort(antwort_text)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
     try:
-        zellen = sheet.col_values(1)  # Spalte "bautraeger_name"
-        for i, wert in enumerate(zellen):
-            if wert == firma_name:
-                zeilen_nr = i + 1
-                sheet.update_cell(zeilen_nr, 6, kategorie)   # Spalte "antwort_erhalten_am"
-                sheet.update_cell(zeilen_nr, 6, f"{kategorie} – {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-                print(f"   [{datetime.now().strftime('%Y-%m-%d %H:%M')}] Sheet aktualisiert: {firma_name} -> {kategorie}")
-                return True
-        print(f"   WARNUNG: Firma '{firma_name}' nicht im Sheet gefunden.")
-        return False
+        treffer = sheet.findall(firma)
+        if treffer:
+            zeile_nr = treffer[-1].row
+            sheet.update_cell(zeile_nr, 8, timestamp)       # H: Antwort am
+            sheet.update_cell(zeile_nr, 9, kategorie)       # I: Antwort-Kategorie
+            sheet.update_cell(zeile_nr, 6, "GEANTWORTET")   # F: Status
+            print(f"[{timestamp}] Antwort klassifiziert: {firma} → {kategorie}")
+        else:
+            print(f"[WARNUNG] Firma nicht im Sheet gefunden: {firma}")
     except Exception as e:
-        print(f"   FEHLER: Sheet konnte nicht aktualisiert werden ({e})")
-        return False
+        print(f"[FEHLER] Antwort-Update fuer {firma}: {e}")
+
+    return kategorie
 
 
 # ── Haupt-Loop ────────────────────────────────
 df = pd.read_csv("bautraeger.csv", index_col=False)
 print(f"Agent startet – {len(df)} Bauträger gefunden.")
-if DRY_RUN:
-    print("MODUS: DRY RUN – E-Mails werden NICHT gesendet.\n")
-else:
-    print("MODUS: LIVE – E-Mails werden wirklich gesendet!\n")
 
+if not TEST_MODUS and sheet is not None:
+    ensure_bautraeger_headers(sheet)
+
+print()
 
 for index, firma in df.iterrows():
     print(f"[{int(index)+1}/{len(df)}] {firma['firma']} – {firma['region']}")
@@ -281,15 +348,13 @@ for index, firma in df.iterrows():
     time.sleep(1)
 
     if score >= 7:
-        # Neue CSV-Felder mit Fallback auf Standardwerte
         email_dict = generate_email(
-            bautraeger_name   = firma["firma"],
-            region            = firma["region"],
-            zimmer_min        = int(firma.get("zimmer_min",  3)),
-            zimmer_max        = int(firma.get("zimmer_max",  4)),
-            wohnflaeche_min   = int(firma.get("wohnflaeche_min",  70)),
-            wohnflaeche_max   = int(firma.get("wohnflaeche_max", 100)),
-            nur_neubau        = str(firma.get("nur_neubau", "True")).lower() in ("true", "1", "ja")
+            bautraeger_name = firma["firma"],
+            region          = firma["region"],
+            zimmer          = int(firma.get("zimmer_min", 3)),
+            wohnflaeche_min = int(firma.get("wohnflaeche_min", 70)),
+            wohnflaeche_max = int(firma.get("wohnflaeche_max", 100)),
+            nur_neubau      = str(firma.get("nur_neubau", "True")).lower() in ("true", "1", "ja")
         )
 
         print(f"\n   --- Generierte E-Mail ---")
@@ -297,25 +362,39 @@ for index, firma in df.iterrows():
         print(f"   Text:\n{email_dict['body']}")
         print(f"   -------------------------\n")
 
-        if DRY_RUN:
-            erfolg = True
-            status = "DRY RUN"
-            print(f"   Score {score}/10 -> DRY RUN (nicht gesendet)")
+        if TEST_MODUS:
+            print(f"   Score {score}/10 → [TEST-MODUS] E-Mail nicht gesendet")
+            print(f"   Sheet-Eintrag (simuliert):")
+            print(f"   {[firma['firma'], firma['email'], firma['region'], firma['stadt'], score, 'KONTAKTIERT', datetime.now().strftime('%Y-%m-%d %H:%M'), '', '', '', '']}")
         else:
             erfolg = sende_email(firma["email"], email_dict["subject"], email_dict["body"])
             status = "KONTAKTIERT" if erfolg else "FEHLER"
-            print(f"   Score {score}/10 -> E-Mail {'gesendet' if erfolg else 'FEHLER'}")
+            print(f"   Score {score}/10 → E-Mail {'gesendet' if erfolg else 'FEHLER'}")
+            if sheet is not None:
+                update_bautraeger_sheet(
+                    sheet, firma["firma"], firma["email"],
+                    firma["region"], firma["stadt"],
+                    score, status
+                )
             time.sleep(45)
 
-        schreibe_ins_sheet(firma["firma"], firma["region"], status, email_dict["subject"], gesendet=erfolg)
-
     elif score >= 5:
-        schreibe_ins_sheet(firma["firma"], firma["region"], "MANUELL PRÜFEN", "", gesendet=False)
-        print(f"   Score {score}/10 -> Manuell prüfen")
+        print(f"   Score {score}/10 → Manuell prüfen")
+        if not TEST_MODUS and sheet is not None:
+            update_bautraeger_sheet(
+                sheet, firma["firma"], firma.get("email", ""),
+                firma["region"], firma["stadt"],
+                score, "MANUELL PRÜFEN"
+            )
 
     else:
-        schreibe_ins_sheet(firma["firma"], firma["region"], "ÜBERSPRUNGEN", "", gesendet=False)
-        print(f"   Score {score}/10 -> Übersprungen")
+        print(f"   Score {score}/10 → Übersprungen")
+        if not TEST_MODUS and sheet is not None:
+            update_bautraeger_sheet(
+                sheet, firma["firma"], firma.get("email", ""),
+                firma["region"], firma["stadt"],
+                score, "ÜBERSPRUNGEN"
+            )
 
     print()
     time.sleep(1)
