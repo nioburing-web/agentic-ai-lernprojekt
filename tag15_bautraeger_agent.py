@@ -309,15 +309,16 @@ def update_bautraeger_sheet(sheet, firma: str, email: str, region: str,
 
 
 # ── Aufgabe 4: verarbeite_bautraeger_antwort() ───
-def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str):
+def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str,
+                                   empfaenger_email: str = ""):
     """
-    Klassifiziert eine Bautraeger-Antwort und aktualisiert das Sheet.
+    Klassifiziert eine Bautraeger-Antwort und reagiert automatisch.
     Nutzt klassifiziere_antwort() – wird NICHT veraendert.
 
-    Aktualisiert:
-    - Spalte H (Antwort am): Zeitstempel ← Feedback Punkt 6
-    - Spalte I (Antwort-Kategorie): Klassifikation durch klassifiziere_antwort()
-    - Spalte F (Status): wird auf "GEANTWORTET" gesetzt
+    INTERESSE    → Calendly-Link automatisch senden
+    FRAGE        → Benachrichtigung im Terminal – manuell antworten
+    ABLEHNUNG    → Sheet: ABGELEHNT – kein weiterer Kontakt
+    ABWESENHEIT  → Sheet: ABWESEND – spaeter nochmal
     """
     # Bestehenden Reply-Classifier aufrufen – NICHT veraendern
     kategorie = klassifiziere_antwort(antwort_text)
@@ -327,16 +328,79 @@ def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str):
         treffer = sheet.findall(firma)
         if treffer:
             zeile_nr = treffer[-1].row
-            sheet.update_cell(zeile_nr, 8, timestamp)       # H: Antwort am
-            sheet.update_cell(zeile_nr, 9, kategorie)       # I: Antwort-Kategorie
-            sheet.update_cell(zeile_nr, 6, "GEANTWORTET")   # F: Status
+            sheet.update_cell(zeile_nr, 8, timestamp)    # H: Antwort am
+            sheet.update_cell(zeile_nr, 9, kategorie)    # I: Antwort-Kategorie
+
+            if kategorie == "INTERESSE":
+                sheet.update_cell(zeile_nr, 6, "INTERESSIERT")
+            elif kategorie == "FRAGE":
+                sheet.update_cell(zeile_nr, 6, "RUECKFRAGE")
+            elif kategorie == "ABLEHNUNG":
+                sheet.update_cell(zeile_nr, 6, "ABGELEHNT")
+            elif kategorie == "ABWESENHEIT":
+                sheet.update_cell(zeile_nr, 6, "ABWESEND")
+
             print(f"[{timestamp}] Antwort klassifiziert: {firma} → {kategorie}")
         else:
             print(f"[WARNUNG] Firma nicht im Sheet gefunden: {firma}")
     except Exception as e:
         print(f"[FEHLER] Antwort-Update fuer {firma}: {e}")
 
+    # Automatisch reagieren
+    if kategorie == "INTERESSE" and empfaenger_email:
+        sende_calendly_antwort(empfaenger_email, firma)
+    elif kategorie == "FRAGE":
+        print(f"[MANUELL] Rueckfrage von {firma} – bitte selbst antworten!")
+        if empfaenger_email:
+            print(f"[MANUELL] E-Mail: {empfaenger_email}")
+    elif kategorie == "ABLEHNUNG":
+        print(f"[INFO] {firma} hat kein Interesse – kein weiterer Kontakt")
+    elif kategorie == "ABWESENHEIT":
+        print(f"[INFO] {firma} abwesend – spaeter nochmal kontaktieren")
+
     return kategorie
+
+
+# ── Calendly-Antwort senden ───────────────────
+def sende_calendly_antwort(empfaenger_email: str, bautraeger_name: str) -> bool:
+    """
+    Sendet automatisch eine Antwort-E-Mail mit Calendly-Link
+    wenn klassifiziere_antwort() -> 'INTERESSE' zurueckgibt.
+    Versand ueber Brevo.
+    """
+    calendly_link = os.environ.get("CALENDLY_LINK", "")
+    inhalt = (
+        f"Sehr geehrtes Team von {bautraeger_name},\n\n"
+        f"vielen Dank fuer Ihre Rueckmeldung – das freut mich sehr!\n\n"
+        f"Ich wuerde mich gerne kurz mit Ihnen austauschen und mehr ueber "
+        f"Ihre aktuellen Projekte erfahren.\n\n"
+        f"Hier koennen Sie direkt einen passenden Termin auswaehlen:\n"
+        f"{calendly_link}\n\n"
+        f"Der Termin dauert ca. 15 Minuten und ist natuerlich kostenlos.\n\n"
+        f"NIO Automation\n"
+        f"anfragen@nio-automation.de | nio-automation.de"
+    )
+    try:
+        r = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": os.environ.get("BREVO_API_KEY"),
+                     "Content-Type": "application/json"},
+            json={"sender":  {"name": os.environ.get("ABSENDER_NAME"),
+                               "email": os.environ.get("ABSENDER_EMAIL")},
+                  "replyTo": {"email": os.environ.get("REPLY_EMAIL")},
+                  "to":      [{"email": empfaenger_email, "name": bautraeger_name}],
+                  "subject": "Re: KI-Projekt Immobiliensuche – Terminvorschlag",
+                  "textContent": inhalt}
+        )
+        if r.status_code in (200, 201):
+            print(f"[AUTO] Calendly-Link gesendet an: {bautraeger_name} ({empfaenger_email})")
+            return True
+        else:
+            print(f"[FEHLER] Calendly-Antwort fehlgeschlagen: {r.text}")
+            return False
+    except Exception as e:
+        print(f"[FEHLER] sende_calendly_antwort fuer {bautraeger_name}: {e}")
+        return False
 
 
 # ── Duplikat-Schutz ──────────────────────────
