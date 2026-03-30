@@ -11,12 +11,55 @@ Oder importiert werden:
 from dotenv import load_dotenv
 import os
 import time
+import requests
 from openai import OpenAI
 
 load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 GUELTIGE_KATEGORIEN = {"INTERESSE", "ABLEHNUNG", "FRAGE", "ABWESENHEIT"}
+
+
+# ── Calendly-Antwort senden ───────────────────
+def sende_calendly_antwort(empfaenger_email: str, bautraeger_name: str) -> bool:
+    """
+    Sendet automatisch eine Antwort-E-Mail mit Calendly-Link
+    wenn klassifiziere_antwort() -> 'INTERESSE' zurueckgibt.
+    Versand ueber Brevo.
+    """
+    calendly_link = os.environ.get("CALENDLY_LINK", "")
+    inhalt = (
+        f"Sehr geehrtes Team von {bautraeger_name},\n\n"
+        f"vielen Dank fuer Ihre Rueckmeldung – das freut mich sehr!\n\n"
+        f"Ich wuerde mich gerne kurz mit Ihnen austauschen und mehr ueber "
+        f"Ihre aktuellen Projekte erfahren.\n\n"
+        f"Hier koennen Sie direkt einen passenden Termin auswaehlen:\n"
+        f"{calendly_link}\n\n"
+        f"Der Termin dauert ca. 15 Minuten und ist natuerlich kostenlos.\n\n"
+        f"NIO Automation\n"
+        f"anfragen@nio-automation.de | nio-automation.de"
+    )
+    try:
+        r = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": os.environ.get("BREVO_API_KEY"),
+                     "Content-Type": "application/json"},
+            json={"sender":  {"name": os.environ.get("ABSENDER_NAME"),
+                               "email": os.environ.get("ABSENDER_EMAIL")},
+                  "replyTo": {"email": os.environ.get("REPLY_EMAIL")},
+                  "to":      [{"email": empfaenger_email, "name": bautraeger_name}],
+                  "subject": "Re: KI-Projekt Immobiliensuche – Terminvorschlag",
+                  "textContent": inhalt}
+        )
+        if r.status_code in (200, 201):
+            print(f"[AUTO] Calendly-Link gesendet an: {bautraeger_name} ({empfaenger_email})")
+            return True
+        else:
+            print(f"[FEHLER] Calendly-Antwort fehlgeschlagen: {r.text}")
+            return False
+    except Exception as e:
+        print(f"[FEHLER] sende_calendly_antwort fuer {bautraeger_name}: {e}")
+        return False
 
 
 # ── Hauptfunktion: Antwort klassifizieren ─────
