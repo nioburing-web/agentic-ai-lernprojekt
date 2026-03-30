@@ -315,10 +315,10 @@ def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str,
     Klassifiziert eine Bautraeger-Antwort und reagiert automatisch.
     Nutzt klassifiziere_antwort() – wird NICHT veraendert.
 
-    INTERESSE    → Calendly-Link automatisch senden
-    FRAGE        → Benachrichtigung im Terminal – manuell antworten
-    ABLEHNUNG    → Sheet: ABGELEHNT – kein weiterer Kontakt
-    ABWESENHEIT  → Sheet: ABWESEND – spaeter nochmal
+    INTERESSE    -> Calendly-Link automatisch senden
+    FRAGE        -> Benachrichtigung im Terminal – manuell antworten
+    ABLEHNUNG    -> Sheet: ABGELEHNT – kein weiterer Kontakt
+    ABWESENHEIT  -> Sheet: ABWESEND – spaeter nochmal
     """
     # Bestehenden Reply-Classifier aufrufen – NICHT veraendern
     kategorie = klassifiziere_antwort(antwort_text)
@@ -340,7 +340,7 @@ def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str,
             elif kategorie == "ABWESENHEIT":
                 sheet.update_cell(zeile_nr, 6, "ABWESEND")
 
-            print(f"[{timestamp}] Antwort klassifiziert: {firma} → {kategorie}")
+            print(f"[{timestamp}] Antwort klassifiziert: {firma} -> {kategorie}")
         else:
             print(f"[WARNUNG] Firma nicht im Sheet gefunden: {firma}")
     except Exception as e:
@@ -413,7 +413,7 @@ def ist_bereits_kontaktiert(sheet, firma: str) -> bool:
     try:
         treffer = sheet.findall(firma)
         if not treffer:
-            return False  # Nicht im Sheet → neu eintragen
+            return False  # Nicht im Sheet -> neu eintragen
 
         for zelle in treffer:
             zeile_nr = zelle.row
@@ -422,7 +422,7 @@ def ist_bereits_kontaktiert(sheet, firma: str) -> bool:
                 print(f"[SKIP] {firma} – bereits kontaktiert (Status: {status}). Wird übersprungen.")
                 return True
 
-        return False  # Im Sheet aber kein KONTAKTIERT-Status → neu eintragen
+        return False  # Im Sheet aber kein KONTAKTIERT-Status -> neu eintragen
 
     except Exception as e:
         print(f"[WARNUNG] Duplikat-Pruefung fuer {firma} fehlgeschlagen: {e}")
@@ -430,78 +430,78 @@ def ist_bereits_kontaktiert(sheet, firma: str) -> bool:
 
 
 # ── Haupt-Loop ────────────────────────────────
-df = pd.read_csv("bautraeger.csv", index_col=False)
-print(f"Agent startet – {len(df)} Bauträger gefunden.")
+if __name__ == "__main__":
+    df = pd.read_csv("bautraeger.csv", index_col=False)
+    print(f"Agent startet – {len(df)} Bautraeger gefunden.")
 
-if not TEST_MODUS and sheet is not None:
-    ensure_bautraeger_headers(sheet)
-
-print()
-
-for index, firma in df.iterrows():
-    print(f"[{int(index)+1}/{len(df)}] {firma['firma']} – {firma['region']}")
-
-    # ── DUPLIKAT-SCHUTZ ─────────────────────────────────────────
-    if not TEST_MODUS and sheet is not None and ist_bereits_kontaktiert(sheet, firma["firma"]):
-        continue  # Überspringen – kein doppelter Eintrag
-    # ────────────────────────────────────────────────────────────
-
-    score = bewerte_bautraeger(firma)
-    time.sleep(1)
-
-    if score >= 7:
-        email_dict = generate_email(
-            bautraeger_name = firma["firma"],
-            region          = firma["region"],
-            zimmer          = int(firma.get("zimmer_min", 3)),
-            wohnflaeche_min = int(firma.get("wohnflaeche_min", 70)),
-            wohnflaeche_max = int(firma.get("wohnflaeche_max", 100)),
-            nur_neubau      = str(firma.get("nur_neubau", "True")).lower() in ("true", "1", "ja")
-        )
-
-        print(f"\n   --- Generierte E-Mail ---")
-        print(f"   Betreff: {email_dict['subject']}")
-        signatur_vorschau = "\n\nNIO Automation\nanfragen@nio-automation.de | nio-automation.de"
-        print(f"   Text:\n{email_dict['body']}{signatur_vorschau}")
-        print(f"   -------------------------\n")
-
-        if TEST_MODUS:
-            print(f"   Score {score}/10 → [TEST-MODUS] E-Mail nicht gesendet")
-            print(f"   Absender: {os.environ.get('ABSENDER_EMAIL')} → Empfaenger: {firma['email']}")
-            print(f"   Sheet-Eintrag (simuliert):")
-            print(f"   {[firma['firma'], firma['email'], firma['region'], firma['stadt'], score, 'KONTAKTIERT', datetime.now().strftime('%Y-%m-%d %H:%M'), '', '', '', '']}")
-        else:
-            erfolg = sende_email(firma["email"], email_dict["subject"], email_dict["body"])
-            status = "KONTAKTIERT" if erfolg else "FEHLER"
-            print(f"   Score {score}/10 → E-Mail {'gesendet' if erfolg else 'FEHLER'}")
-            if sheet is not None:
-                update_bautraeger_sheet(
-                    sheet, firma["firma"], firma["email"],
-                    firma["region"], firma["stadt"],
-                    score, status
-                )
-            time.sleep(45)
-
-    elif score >= 5:
-        print(f"   Score {score}/10 → Manuell prüfen")
-        if not TEST_MODUS and sheet is not None:
-            update_bautraeger_sheet(
-                sheet, firma["firma"], firma.get("email", ""),
-                firma["region"], firma["stadt"],
-                score, "MANUELL PRÜFEN"
-            )
-
-    else:
-        print(f"   Score {score}/10 → Übersprungen")
-        if not TEST_MODUS and sheet is not None:
-            update_bautraeger_sheet(
-                sheet, firma["firma"], firma.get("email", ""),
-                firma["region"], firma["stadt"],
-                score, "ÜBERSPRUNGEN"
-            )
+    if not TEST_MODUS and sheet is not None:
+        ensure_bautraeger_headers(sheet)
 
     print()
-    time.sleep(1)
 
+    for index, firma in df.iterrows():
+        print(f"[{int(index)+1}/{len(df)}] {firma['firma']} – {firma['region']}")
 
-print("Agent fertig! Ergebnisse im Google Sheet.")
+        # ── DUPLIKAT-SCHUTZ ─────────────────────────────────────────
+        if not TEST_MODUS and sheet is not None and ist_bereits_kontaktiert(sheet, firma["firma"]):
+            continue  # Ueberspringen – kein doppelter Eintrag
+        # ────────────────────────────────────────────────────────────
+
+        score = bewerte_bautraeger(firma)
+        time.sleep(1)
+
+        if score >= 7:
+            email_dict = generate_email(
+                bautraeger_name = firma["firma"],
+                region          = firma["region"],
+                zimmer          = int(firma.get("zimmer_min", 3)),
+                wohnflaeche_min = int(firma.get("wohnflaeche_min", 70)),
+                wohnflaeche_max = int(firma.get("wohnflaeche_max", 100)),
+                nur_neubau      = str(firma.get("nur_neubau", "True")).lower() in ("true", "1", "ja")
+            )
+
+            print(f"\n   --- Generierte E-Mail ---")
+            print(f"   Betreff: {email_dict['subject']}")
+            signatur_vorschau = "\n\nNIO Automation\nanfragen@nio-automation.de | nio-automation.de"
+            print(f"   Text:\n{email_dict['body']}{signatur_vorschau}")
+            print(f"   -------------------------\n")
+
+            if TEST_MODUS:
+                print(f"   Score {score}/10 -> [TEST-MODUS] E-Mail nicht gesendet")
+                print(f"   Absender: {os.environ.get('ABSENDER_EMAIL')} -> Empfaenger: {firma['email']}")
+                print(f"   Sheet-Eintrag (simuliert):")
+                print(f"   {[firma['firma'], firma['email'], firma['region'], firma['stadt'], score, 'KONTAKTIERT', datetime.now().strftime('%Y-%m-%d %H:%M'), '', '', '', '']}")
+            else:
+                erfolg = sende_email(firma["email"], email_dict["subject"], email_dict["body"])
+                status = "KONTAKTIERT" if erfolg else "FEHLER"
+                print(f"   Score {score}/10 -> E-Mail {'gesendet' if erfolg else 'FEHLER'}")
+                if sheet is not None:
+                    update_bautraeger_sheet(
+                        sheet, firma["firma"], firma["email"],
+                        firma["region"], firma["stadt"],
+                        score, status
+                    )
+                time.sleep(45)
+
+        elif score >= 5:
+            print(f"   Score {score}/10 -> Manuell pruefen")
+            if not TEST_MODUS and sheet is not None:
+                update_bautraeger_sheet(
+                    sheet, firma["firma"], firma.get("email", ""),
+                    firma["region"], firma["stadt"],
+                    score, "MANUELL PRUEFEN"
+                )
+
+        else:
+            print(f"   Score {score}/10 -> Uebersprungen")
+            if not TEST_MODUS and sheet is not None:
+                update_bautraeger_sheet(
+                    sheet, firma["firma"], firma.get("email", ""),
+                    firma["region"], firma["stadt"],
+                    score, "UEBERSPRUNGEN"
+                )
+
+        print()
+        time.sleep(1)
+
+    print("Agent fertig! Ergebnisse im Google Sheet.")

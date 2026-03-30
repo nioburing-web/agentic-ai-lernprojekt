@@ -14,3 +14,6 @@ credentials.json
 
 # Projekt-Kontext für Claude Code – nicht veröffentlichen
 CLAUDE.md
+
+# Lokale Log-Datei
+agent_log.txt
