@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 LOG_DATEI = "agent_log.txt"
+TEST_MODUS = "--test" in sys.argv
 
 
 def log(schritt: int, nachricht: str, auch_datei: bool = True):
@@ -38,6 +39,8 @@ with open(LOG_DATEI, "a", encoding="utf-8") as f:
 
 print("=" * 55)
 print("NIO Automation - Haupt-Pipeline")
+if TEST_MODUS:
+    print("[TEST-MODUS] Keine E-Mails werden gesendet!")
 print(f"Start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print("=" * 55)
 
@@ -60,7 +63,7 @@ except Exception as e:
 log_header("Schritt 2 startet: Bautraeger bewerten & E-Mails senden")
 try:
     ergebnis = subprocess.run(
-        [sys.executable, "tag15_bautraeger_agent.py"],
+        [sys.executable, "tag15_bautraeger_agent.py"] + (["--test"] if TEST_MODUS else []),
         capture_output=False,
         text=True
     )
