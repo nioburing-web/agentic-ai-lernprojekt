@@ -437,6 +437,24 @@ def ist_bereits_kontaktiert(sheet, firma: str) -> bool:
         return False  # Im Zweifel lieber nicht überspringen
 
 
+# ── Tageslimit E-Mail-Versand ─────────────────
+MAX_EMAILS_PRO_TAG = 10
+
+def emails_heute_gesendet(sheet) -> int:
+    """Zaehlt wie viele E-Mails heute bereits gesendet wurden (Status: KONTAKTIERT)."""
+    heute = datetime.now().strftime("%Y-%m-%d")
+    try:
+        alle = sheet.get_all_records()
+        return sum(
+            1 for r in alle
+            if r.get("Status") == "KONTAKTIERT"
+            and str(r.get("Anfrage gesendet am", "")).startswith(heute)
+        )
+    except Exception as e:
+        print(f"[WARNUNG] Tageslimit-Pruefung fehlgeschlagen: {e}")
+        return 0
+
+
 # ── Haupt-Loop ────────────────────────────────
 if __name__ == "__main__":
     df = pd.read_csv("bautraeger.csv", index_col=False)
@@ -445,11 +463,23 @@ if __name__ == "__main__":
 
     if not TEST_MODUS and sheet is not None:
         ensure_bautraeger_headers(sheet)
+        bereits_heute = emails_heute_gesendet(sheet)
+        print(f"[LIMIT] Heute bereits gesendet: {bereits_heute}/{MAX_EMAILS_PRO_TAG}")
+    else:
+        bereits_heute = 0
 
     print()
 
+    emails_diese_session = 0
+
     for index, firma in df.iterrows():
         print(f"[{int(index)+1}/{len(df)}] {firma['firma']} – {firma['region']}")
+
+        # ── TAGESLIMIT ───────────────────────────────────────────────
+        if not TEST_MODUS and (bereits_heute + emails_diese_session) >= MAX_EMAILS_PRO_TAG:
+            print(f"[LIMIT] Tageslimit von {MAX_EMAILS_PRO_TAG} E-Mails erreicht – Abbruch.")
+            break
+        # ────────────────────────────────────────────────────────────
 
         # ── DUPLIKAT-SCHUTZ ─────────────────────────────────────────
         if not TEST_MODUS and sheet is not None and ist_bereits_kontaktiert(sheet, firma["firma"]):
@@ -483,7 +513,9 @@ if __name__ == "__main__":
             else:
                 erfolg = sende_email(firma["email"], email_dict["subject"], email_dict["body"])
                 status = "KONTAKTIERT" if erfolg else "FEHLER"
-                print(f"   Score {score}/10 -> E-Mail {'gesendet' if erfolg else 'FEHLER'}")
+                if erfolg:
+                    emails_diese_session += 1
+                print(f"   Score {score}/10 -> E-Mail {'gesendet' if erfolg else 'FEHLER'} ({bereits_heute + emails_diese_session}/{MAX_EMAILS_PRO_TAG} heute)")
                 if sheet is not None:
                     update_bautraeger_sheet(
                         sheet, firma["firma"], firma["email"],
