@@ -116,6 +116,14 @@ Antworte NUR mit einer Zahl zwischen 1 und 10.
         score = int(raw)
         if not 1 <= score <= 10:
             raise ValueError(f"Score außerhalb des gültigen Bereichs: {score}")
+
+        # Mallorca/Spanien unter 500.000 Euro: Score -2 (Neubauten selten unter 400k)
+        region = str(firma.get("region", "")).lower()
+        budget = int(firma.get("budget", 400000) or 400000)
+        if any(r in region for r in ["mallorca", "spanien"]) and budget < 500000:
+            score = max(1, score - 2)
+            print(f"   [REGEL] Mallorca/Spanien + Budget < 500k -> Score -2 (jetzt {score})")
+
         return score
     except ValueError as e:
         print(f"   WARNUNG: Ungültige Score-Antwort ({e}) – Fallback-Score 5")
