@@ -8,6 +8,7 @@ from google.oauth2.service_account import Credentials
 from openai import OpenAI
 from datetime import datetime
 import time
+from tag12_reply_classifier import klassifiziere_antwort
 
 
 load_dotenv()
@@ -223,43 +224,7 @@ FORMAT: BETREFF: [Betreff]\n\n[E-Mail Text]"""
         }
 
 
-# ── Funktion 3: Antwort klassifizieren ────────
-# NICHT VERÄNDERN
-GUELTIGE_KATEGORIEN = {"INTERESSE", "ABLEHNUNG", "FRAGE", "ABWESENHEIT"}
-
-def klassifiziere_antwort(antwort_text):
-    prompt = f"""
-Du analysierst die Antwort eines Bauträgers auf eine Wohnungsanfrage.
-
-Ordne die Antwort in genau eine dieser Kategorien ein:
-- INTERESSE: Der Bauträger hat passende Wohnungen oder zeigt konkretes Interesse
-- ABLEHNUNG: Der Bauträger hat keine passenden Wohnungen oder lehnt ab
-- FRAGE: Der Bauträger stellt Rückfragen bevor er antworten kann
-- ABWESENHEIT: Automatische Abwesenheitsnotiz oder Bauträger nicht erreichbar
-
-Antwort des Bauträgers:
-{antwort_text}
-
-Antworte NUR mit einem dieser vier Wörter: INTERESSE, ABLEHNUNG, FRAGE oder ABWESENHEIT.
-"""
-    try:
-        r = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
-            temperature=0.0
-        )
-        kategorie = r.choices[0].message.content.strip().upper()
-        if kategorie not in GUELTIGE_KATEGORIEN:
-            raise ValueError(f"Unbekannte Kategorie: {kategorie}")
-        return kategorie
-    except ValueError as e:
-        print(f"   WARNUNG: Ungültige Kategorisierung ({e}) – Fallback FRAGE")
-        return "FRAGE"
-    except Exception as e:
-        print(f"   FEHLER: OpenAI API nicht erreichbar ({e}) – Fallback FRAGE")
-        return "FRAGE"
-
+# klassifiziere_antwort() wird aus tag12_reply_classifier.py importiert
 
 # ── Funktion 4: E-Mail senden ──────────────────
 def sende_email(an, betreff, text):
