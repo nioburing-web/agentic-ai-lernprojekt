@@ -432,6 +432,7 @@ def ist_bereits_kontaktiert(sheet, firma: str) -> bool:
 # ── Haupt-Loop ────────────────────────────────
 if __name__ == "__main__":
     df = pd.read_csv("bautraeger.csv", index_col=False)
+    df = df.fillna("")  # NaN-Werte zu leerem String – verhindert JSON-Fehler
     print(f"Agent startet – {len(df)} Bautraeger gefunden.")
 
     if not TEST_MODUS and sheet is not None:
