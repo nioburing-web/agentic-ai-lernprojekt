@@ -64,34 +64,34 @@ Antworte NUR mit einem dieser vier Woerter: INTERESSE, ABLEHNUNG, FRAGE oder ABW
         return "FRAGE"
 
 
-# ── Standalone-Test ───────────────────────────
+# ── Standalone: Gmail lesen + Sheet aktualisieren ─────
 if __name__ == "__main__":
-    test_antworten = [
-        {
-            "firma": "Muster Bautraeger GmbH",
-            "text":  "Guten Tag, das klingt interessant! Wann haetten Sie Zeit fuer ein kurzes Gespraech?"
-        },
-        {
-            "firma": "Beispiel Immobilien AG",
-            "text":  "Vielen Dank, aber wir haben derzeit kein Interesse."
-        },
-        {
-            "firma": "Test Wohnbau GmbH",
-            "text":  "Was genau wuerden Sie automatisieren? Welche Kosten entstehen?"
-        },
-        {
-            "firma": "Demo Bautraeger",
-            "text":  "Ich bin bis zum 15. Januar im Urlaub. Bitte kontaktieren Sie mich danach."
-        },
-    ]
+    from gmail_reader import lese_neue_antworten
+    from tag15_bautraeger_agent import verarbeite_bautraeger_antwort, sheet
 
-    print("=" * 50)
-    print("Reply-Classifier – Standalone-Test")
-    print("=" * 50)
+    print("=" * 55)
+    print("Reply-Classifier – Gmail lesen & Sheet aktualisieren")
+    print("=" * 55)
 
-    for antwort in test_antworten:
-        kategorie = klassifiziere_antwort(antwort["text"])
-        print(f"{kategorie:12} | {antwort['firma']}")
-        print(f"             | {antwort['text'][:60]}...")
-        print()
-        time.sleep(1)
+    antworten = lese_neue_antworten()
+
+    if not antworten:
+        print("Keine neuen Bautraeger-Antworten gefunden.")
+    else:
+        print(f"{len(antworten)} Antwort(en) gefunden – verarbeite...\n")
+        for antwort in antworten:
+            print(f"Firma:   {antwort['firma']}")
+            print(f"Von:     {antwort['absender']}")
+            print(f"Betreff: {antwort['betreff']}")
+            kategorie = verarbeite_bautraeger_antwort(
+                sheet            = sheet,
+                firma            = antwort["firma"],
+                antwort_text     = antwort["text"],
+                empfaenger_email = antwort["absender"]
+            )
+            print(f"Ergebnis: {kategorie}")
+            print()
+            time.sleep(1)
+
+    print("=" * 55)
+    print("Fertig.")
