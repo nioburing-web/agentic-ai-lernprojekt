@@ -75,43 +75,24 @@ except Exception as e:
     log(2, f"FEHLER - {e}")
 
 
-# ── Schritt 3: Gmail lesen & Antworten klassifizieren ─────
-log_header("Schritt 3 startet: Gmail lesen & Antworten klassifizieren")
-antworten = []
+# ── Schritt 3+4: Gmail lesen, klassifizieren, Sheet + Calendly ──
+log_header("Schritt 3+4 startet: Antworten lesen, klassifizieren & reagieren")
 try:
-    from gmail_reader import lese_neue_antworten
-    from tag15_bautraeger_agent import klassifiziere_antwort
-    antworten = lese_neue_antworten()
-    for antwort in antworten:
-        kategorie = klassifiziere_antwort(antwort["text"])
-        antwort["kategorie"] = kategorie
-        print(f"  {antwort['firma']} -> {kategorie}")
-    log(3, f"Erfolgreich - {len(antworten)} Antwort(en) klassifiziert.")
+    ergebnis = subprocess.run(
+        [sys.executable, "tag12_reply_classifier.py"],
+        capture_output=False,
+        text=True
+    )
+    if ergebnis.returncode == 0:
+        log(3, "Erfolgreich - Antworten klassifiziert, Sheet aktualisiert, Calendly gesendet.")
+    else:
+        log(3, f"FEHLER - Exitcode {ergebnis.returncode}")
 except Exception as e:
     log(3, f"FEHLER - {e}")
 
 
-# ── Schritt 4: Automatisch auf Antworten reagieren ────────
-log_header("Schritt 4 startet: Automatisch auf Antworten reagieren")
-try:
-    if not antworten:
-        log(4, "Keine Antworten vorhanden - nichts zu tun.")
-    else:
-        from tag15_bautraeger_agent import verarbeite_bautraeger_antwort, sheet
-        for antwort in antworten:
-            verarbeite_bautraeger_antwort(
-                sheet            = sheet,
-                firma            = antwort["firma"],
-                antwort_text     = antwort["text"],
-                empfaenger_email = antwort["absender"]
-            )
-        log(4, f"Erfolgreich - {len(antworten)} Antwort(en) verarbeitet.")
-except Exception as e:
-    log(4, f"FEHLER - {e}")
-
-
 # ── Abschluss ─────────────────────────────────────────────
 print("-" * 55)
-abschluss = f"Pipeline abgeschlossen. Neue Bautraeger: {neue_bautraeger} | Antworten: {len(antworten)}"
+abschluss = f"Pipeline abgeschlossen. Neue Bautraeger: {neue_bautraeger}"
 log(0, abschluss)
 print("=" * 55)
