@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 from openai import OpenAI
 from datetime import datetime
 import time
-from tag12_reply_classifier import klassifiziere_antwort, sende_calendly_antwort
+from tag12_reply_classifier import klassifiziere_antwort, sende_interesse_benachrichtigung
 
 
 load_dotenv()
@@ -321,7 +321,7 @@ def verarbeite_bautraeger_antwort(sheet, firma: str, antwort_text: str,
 
     # Automatisch reagieren
     if kategorie == "INTERESSE" and empfaenger_email:
-        sende_calendly_antwort(empfaenger_email, firma)
+        sende_interesse_benachrichtigung(empfaenger_email, firma, antwort_text)
     elif kategorie == "FRAGE":
         print(f"[MANUELL] Rueckfrage von {firma} – bitte selbst antworten!")
         if empfaenger_email:

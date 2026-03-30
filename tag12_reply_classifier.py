@@ -107,6 +107,43 @@ Antworte NUR mit einem dieser vier Woerter: INTERESSE, ABLEHNUNG, FRAGE oder ABW
         return "FRAGE"
 
 
+# ── Benachrichtigung bei Interesse ───────────────────
+def sende_interesse_benachrichtigung(bautraeger_email: str, bautraeger_name: str,
+                                      antwort_text: str) -> bool:
+    """
+    Sendet eine Benachrichtigung an REPLY_EMAIL wenn ein Bautraeger Interesse zeigt.
+    Kein automatischer Calendly-Link – der Kunde prueft manuell.
+    """
+    reply_email = os.environ.get("REPLY_EMAIL", "")
+    inhalt = (
+        f"Ein Bautraeger hat auf deine Anfrage geantwortet und zeigt Interesse!\n\n"
+        f"Firma: {bautraeger_name}\n"
+        f"E-Mail: {bautraeger_email}\n\n"
+        f"Antwort des Bautraegers:\n{antwort_text}\n\n"
+        f"Bitte manuell pruefen und bei Interesse Termin vereinbaren."
+    )
+    try:
+        r = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": os.environ.get("BREVO_API_KEY"),
+                     "Content-Type": "application/json"},
+            json={"sender":  {"name": os.environ.get("ABSENDER_NAME"),
+                               "email": os.environ.get("ABSENDER_EMAIL")},
+                  "to":      [{"email": reply_email}],
+                  "subject": "Bautraeger hat Interesse – manuelle Aktion noetig",
+                  "textContent": inhalt}
+        )
+        if r.status_code in (200, 201):
+            print(f"[INTERESSE] Benachrichtigung gesendet an: {reply_email}")
+            return True
+        else:
+            print(f"[FEHLER] Benachrichtigung fehlgeschlagen: {r.text}")
+            return False
+    except Exception as e:
+        print(f"[FEHLER] sende_interesse_benachrichtigung: {e}")
+        return False
+
+
 # ── Standalone: Gmail lesen + Sheet aktualisieren ─────
 if __name__ == "__main__":
     from gmail_reader import lese_neue_antworten
