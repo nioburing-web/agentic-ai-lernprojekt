@@ -78,9 +78,9 @@ def klassifiziere_antwort(antwort_text: str) -> str:
 Du analysierst die Antwort eines Bautraegers auf eine Wohnungsanfrage.
 
 Ordne die Antwort in genau eine dieser Kategorien ein:
-- INTERESSE: Der Bautraeger hat passende Wohnungen oder zeigt konkretes Interesse
+- INTERESSE: Der Bautraeger zeigt Interesse, hat passende Wohnungen, moechte mehr Infos oder schlaegt ein Gespraech/Termin vor
 - ABLEHNUNG: Der Bautraeger hat keine passenden Wohnungen oder lehnt ab
-- FRAGE: Der Bautraeger stellt Rueckfragen bevor er antworten kann
+- FRAGE: Der Bautraeger stellt Rueckfragen zu Preis, Zeitplan oder Details – aber zeigt dabei kein klares Interesse
 - ABWESENHEIT: Automatische Abwesenheitsnotiz oder Bautraeger nicht erreichbar
 
 Antwort des Bautraegers:

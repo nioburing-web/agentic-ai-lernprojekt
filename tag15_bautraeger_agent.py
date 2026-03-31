@@ -391,7 +391,11 @@ if __name__ == "__main__":
         df_offen = df[~df["status"].str.upper().isin(BEREITS_KONTAKTIERT)].reset_index(drop=True)
     else:
         df_offen = df
-    print(f"{len(df_offen)} Bautraeger noch nicht kontaktiert – sende heute max {MAX_EMAILS_PRO_TAG} E-Mails")
+    print(f"Gesamt: {len(df)} Leads | Noch nicht kontaktiert: {len(df_offen)} | Heute max: {MAX_EMAILS_PRO_TAG}")
+
+    if len(df_offen) == 0:
+        print(f"Alle {len(df)} Leads wurden bereits kontaktiert. Nichts zu tun.")
+        exit()
 
     if not TEST_MODUS and sheet is not None:
         ensure_bautraeger_headers(sheet)
@@ -443,16 +447,24 @@ if __name__ == "__main__":
             print(f"   -------------------------\n")
 
             if TEST_MODUS:
+                emails_diese_session += 1
                 print(f"   Score {score}/10 -> [TEST-MODUS] E-Mail nicht gesendet")
                 print(f"   Absender: {os.environ.get('ABSENDER_EMAIL')} -> Empfaenger: {firma['email']}")
                 print(f"   Sheet-Eintrag (simuliert):")
                 print(f"   {[firma['firma'], firma['email'], firma['region'], firma['stadt'], score, 'KONTAKTIERT', datetime.now().strftime('%Y-%m-%d %H:%M'), '', '', '', '']}")
+                gesamt_kontaktiert = bereits_heute + emails_diese_session
+                prozent = round(gesamt_kontaktiert / len(df) * 100)
+                print(f"   Fortschritt: {gesamt_kontaktiert} von {len(df)} Leads kontaktiert ({prozent}% abgeschlossen)")
             else:
                 erfolg = sende_email(firma["email"], email_dict["subject"], email_dict["body"])
                 status = "KONTAKTIERT" if erfolg else "FEHLER"
                 if erfolg:
                     emails_diese_session += 1
                 print(f"   Score {score}/10 -> E-Mail {'gesendet' if erfolg else 'FEHLER'} ({bereits_heute + emails_diese_session}/{MAX_EMAILS_PRO_TAG} heute)")
+                if erfolg:
+                    gesamt_kontaktiert = bereits_heute + emails_diese_session
+                    prozent = round(gesamt_kontaktiert / len(df) * 100)
+                    print(f"   Fortschritt: {gesamt_kontaktiert} von {len(df)} Leads kontaktiert ({prozent}% abgeschlossen)")
                 if sheet is not None:
                     update_bautraeger_sheet(
                         sheet, firma["firma"], firma["email"],

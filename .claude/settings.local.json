@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python tag15_bautraeger_agent.py)",
+      "Bash(python maps_recherche.py --region Hamburg --anzahl 3)",
+      "Bash(python -c \"import csv; r=list\\(csv.reader\\(open\\(''bautraeger.csv'', encoding=''utf-8''\\)\\)\\); print\\(r[0]\\)\")"
+    ]
+  }
+}
