@@ -229,8 +229,10 @@ FORMAT: BETREFF: [Betreff]\n\n[E-Mail Text]"""
 # ── Funktion 4: E-Mail senden ──────────────────
 def sende_email(an, betreff, text):
     signatur = (
-        "\n\nNIO Automation\n"
-        "anfragen@nio-automation.de | nio-automation.de"
+        f"\n\nMit freundlichen Grüßen\n"
+        f"{os.environ.get('ABSENDER_NAME')}\n"
+        f"{os.environ.get('ABSENDER_EMAIL')}\n"
+        f"{os.environ.get('ABSENDER_WEBSITE')}"
     )
     try:
         r = requests.post(
@@ -426,7 +428,12 @@ if __name__ == "__main__":
 
             print(f"\n   --- Generierte E-Mail ---")
             print(f"   Betreff: {email_dict['subject']}")
-            signatur_vorschau = "\n\nNIO Automation\nanfragen@nio-automation.de | nio-automation.de"
+            signatur_vorschau = (
+                f"\n\nMit freundlichen Grüßen\n"
+                f"{os.environ.get('ABSENDER_NAME')}\n"
+                f"{os.environ.get('ABSENDER_EMAIL')}\n"
+                f"{os.environ.get('ABSENDER_WEBSITE')}"
+            )
             print(f"   Text:\n{email_dict['body']}{signatur_vorschau}")
             print(f"   -------------------------\n")
 

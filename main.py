@@ -8,6 +8,7 @@ load_dotenv()
 
 LOG_DATEI = "agent_log.txt"
 TEST_MODUS = "--test" in sys.argv
+NUR_REPLIES = "--nur-replies" in sys.argv
 
 
 def log(schritt: int, nachricht: str, auch_datei: bool = True):
@@ -46,33 +47,39 @@ print("=" * 55)
 
 
 # ── Schritt 1: Neue Bautraeger recherchieren ──────────────
-log_header("Schritt 1 startet: Neue Bautraeger recherchieren")
 neue_bautraeger = 0
-try:
-    from maps_recherche import recherchiere_alle_regionen, lade_bestehende_csv
-    vorher = len(lade_bestehende_csv())
-    recherchiere_alle_regionen()
-    nachher = len(lade_bestehende_csv())
-    neue_bautraeger = nachher - vorher
-    log(1, f"Erfolgreich - {neue_bautraeger} neue Bautraeger in bautraeger.csv geschrieben.")
-except Exception as e:
-    log(1, f"FEHLER - {e}")
+if NUR_REPLIES:
+    log(1, "Uebersprungen (--nur-replies)")
+else:
+    log_header("Schritt 1 startet: Neue Bautraeger recherchieren")
+    try:
+        from maps_recherche import recherchiere_alle_regionen, lade_bestehende_csv
+        vorher = len(lade_bestehende_csv())
+        recherchiere_alle_regionen()
+        nachher = len(lade_bestehende_csv())
+        neue_bautraeger = nachher - vorher
+        log(1, f"Erfolgreich - {neue_bautraeger} neue Bautraeger in bautraeger.csv geschrieben.")
+    except Exception as e:
+        log(1, f"FEHLER - {e}")
 
 
 # ── Schritt 2: Bautraeger bewerten & E-Mails senden ───────
-log_header("Schritt 2 startet: Bautraeger bewerten & E-Mails senden")
-try:
-    ergebnis = subprocess.run(
-        [sys.executable, "tag15_bautraeger_agent.py"] + (["--test"] if TEST_MODUS else []),
-        capture_output=False,
-        text=True
-    )
-    if ergebnis.returncode == 0:
-        log(2, "Erfolgreich - Bautraeger bewertet, E-Mails gesendet, Sheet aktualisiert.")
-    else:
-        log(2, f"FEHLER - Exitcode {ergebnis.returncode}")
-except Exception as e:
-    log(2, f"FEHLER - {e}")
+if NUR_REPLIES:
+    log(2, "Uebersprungen (--nur-replies)")
+else:
+    log_header("Schritt 2 startet: Bautraeger bewerten & E-Mails senden")
+    try:
+        ergebnis = subprocess.run(
+            [sys.executable, "tag15_bautraeger_agent.py"] + (["--test"] if TEST_MODUS else []),
+            capture_output=False,
+            text=True
+        )
+        if ergebnis.returncode == 0:
+            log(2, "Erfolgreich - Bautraeger bewertet, E-Mails gesendet, Sheet aktualisiert.")
+        else:
+            log(2, f"FEHLER - Exitcode {ergebnis.returncode}")
+    except Exception as e:
+        log(2, f"FEHLER - {e}")
 
 
 # ── Schritt 3+4: Gmail lesen, klassifizieren, Sheet + Calendly ──
