@@ -365,7 +365,7 @@ def ist_bereits_kontaktiert(sheet, firma: str) -> bool:
 
 
 # ── Tageslimit E-Mail-Versand ─────────────────
-MAX_EMAILS_PRO_TAG = 10
+MAX_EMAILS_PRO_TAG = int(os.environ.get("MAX_EMAILS_PRO_TAG", "10"))
 
 def emails_heute_gesendet(sheet) -> int:
     """Zaehlt wie viele E-Mails heute bereits gesendet wurden (Status: KONTAKTIERT)."""
@@ -386,7 +386,12 @@ def emails_heute_gesendet(sheet) -> int:
 if __name__ == "__main__":
     df = pd.read_csv("bautraeger.csv", index_col=False)
     df = df.fillna("")  # NaN-Werte zu leerem String – verhindert JSON-Fehler
-    print(f"Agent startet – {len(df)} Bautraeger gefunden.")
+    BEREITS_KONTAKTIERT = {"KONTAKTIERT", "ABGELEHNT", "ABWESEND", "INTERESSIERT"}
+    if "status" in df.columns:
+        df_offen = df[~df["status"].str.upper().isin(BEREITS_KONTAKTIERT)].reset_index(drop=True)
+    else:
+        df_offen = df
+    print(f"{len(df_offen)} Bautraeger noch nicht kontaktiert – sende heute max {MAX_EMAILS_PRO_TAG} E-Mails")
 
     if not TEST_MODUS and sheet is not None:
         ensure_bautraeger_headers(sheet)
@@ -399,11 +404,11 @@ if __name__ == "__main__":
 
     emails_diese_session = 0
 
-    for index, firma in df.iterrows():
-        print(f"[{int(index)+1}/{len(df)}] {firma['firma']} – {firma['region']}")
+    for index, firma in df_offen.iterrows():
+        print(f"[{int(index)+1}/{len(df_offen)}] {firma['firma']} – {firma['region']}")
 
         # ── TAGESLIMIT ───────────────────────────────────────────────
-        if not TEST_MODUS and (bereits_heute + emails_diese_session) >= MAX_EMAILS_PRO_TAG:
+        if (bereits_heute + emails_diese_session) >= MAX_EMAILS_PRO_TAG:
             print(f"[LIMIT] Tageslimit von {MAX_EMAILS_PRO_TAG} E-Mails erreicht – Abbruch.")
             break
         # ────────────────────────────────────────────────────────────

@@ -25,6 +25,13 @@
 - Mallorca/Spanien: Score wird um 2 reduziert wenn Budget unter 500.000 €
 - Bei `INTERESSE`: Benachrichtigung geht an `REPLY_EMAIL` – kein automatischer Calendly-Link
 
+## Dashboard (Streamlit)
+
+| Command | Was passiert |
+|---|---|
+| `streamlit run dashboard.py` | Dashboard im Browser öffnen (localhost:8501) |
+| `pip install streamlit` | Streamlit installieren (einmalig) |
+
 ## Logs & Dateien
 
 | Command | Was passiert |

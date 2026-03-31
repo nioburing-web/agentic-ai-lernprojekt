@@ -60,7 +60,7 @@ def suche_bautraeger_google_maps(region: str, max_ergebnisse: int = 10) -> list:
                     "place_id": ort.get("place_id", "")
                 }
                 ergebnisse.append(eintrag)
-                print(f"[GEFUNDEN] {eintrag['name']} | {region}")
+                pass  # Einzelausgabe unterdrückt – Zusammenfassung am Ende
 
             # Kurze Pause zwischen Anfragen (API-Limit vermeiden)
             time.sleep(1)
@@ -162,10 +162,10 @@ def lade_bestehende_csv() -> set:
     return bestehende
 
 
-def speichere_in_csv(bautraeger_liste: list):
+def speichere_in_csv(bautraeger_liste: list, max_neu: int = 10):
     """
     Speichert neue Bautraeger in bautraeger.csv.
-    Ueberspringt Duplikate die bereits in der CSV stehen.
+    Ueberspringt Duplikate und stoppt nach max_neu neuen Eintraegen.
     """
     bestehende = lade_bestehende_csv()
     neu_eingetragen = 0
@@ -208,26 +208,50 @@ def speichere_in_csv(bautraeger_liste: list):
             neu_eingetragen += 1
             print(f"[NEU] Eingetragen: {bautraeger['name']} | {bautraeger.get('region', '')}")
 
+            if neu_eingetragen >= max_neu:
+                print(f"[LIMIT] {max_neu} neue Bautraeger erreicht – Abbruch.")
+                break
+
     print(f"\n[FERTIG] {neu_eingetragen} neue Bautraeger in CSV gespeichert.")
 
 
 # ── Aufgabe 6: Hauptfunktion ──────────────────
-def recherchiere_alle_regionen(max_pro_region: int = 10):
+MAX_NEUE_PRO_LAUF = 10
+
+def recherchiere_alle_regionen():
     """
     Hauptfunktion: Sucht Bautraeger in allen Regionen
     und speichert sie in bautraeger.csv.
+    Stoppt nach MAX_NEUE_PRO_LAUF neuen Eintraegen (inkl. API-Calls).
     """
     print("=" * 55)
     print("NIO Automation – Google Maps Bautraeger-Recherche")
+    print(f"Limit: {MAX_NEUE_PRO_LAUF} neue Eintraege pro Lauf")
     print("=" * 55)
 
+    bestehende = lade_bestehende_csv()
+    neu_gefunden = 0
     alle_bautraeger = []
 
     for region in REGIONEN:
-        print(f"\n[SUCHE] Region: {region}")
-        ergebnisse = suche_bautraeger_google_maps(region, max_pro_region)
+        if neu_gefunden >= MAX_NEUE_PRO_LAUF:
+            break
 
+        print(f"\n[SUCHE] Region: {region}")
+        ergebnisse = suche_bautraeger_google_maps(region, max_ergebnisse=20)
+        print(f"        {len(ergebnisse)} Ergebnisse von Google Maps")
+
+        uebersprungen = 0
         for eintrag in ergebnisse:
+            if neu_gefunden >= MAX_NEUE_PRO_LAUF:
+                break
+
+            # Duplikat-Check VOR dem API-Call
+            name = eintrag.get("name", "").lower().strip()
+            if name in bestehende:
+                uebersprungen += 1
+                continue
+
             if eintrag.get("place_id"):
                 details = hole_details(eintrag["place_id"])
                 eintrag["website"] = details.get("website", "")
@@ -241,8 +265,14 @@ def recherchiere_alle_regionen(max_pro_region: int = 10):
 
             eintrag["region"] = region
             alle_bautraeger.append(eintrag)
+            bestehende.add(name)
+            neu_gefunden += 1
+            print(f"        [NEU] {eintrag['name']}")
 
-    speichere_in_csv(alle_bautraeger)
+        if uebersprungen > 0:
+            print(f"        {uebersprungen} bereits vorhanden – übersprungen")
+
+    speichere_in_csv(alle_bautraeger, max_neu=MAX_NEUE_PRO_LAUF)
 
 
 if __name__ == "__main__":
@@ -271,4 +301,4 @@ if __name__ == "__main__":
 
     else:
         # Alle Regionen durchsuchen
-        recherchiere_alle_regionen(max_pro_region=10)
+        recherchiere_alle_regionen()
