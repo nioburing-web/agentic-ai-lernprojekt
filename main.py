@@ -9,6 +9,7 @@ load_dotenv()
 LOG_DATEI = "agent_log.txt"
 TEST_MODUS = "--test" in sys.argv
 NUR_REPLIES = "--nur-replies" in sys.argv
+OHNE_MAPS = "--ohne-maps" in sys.argv
 
 
 def log(schritt: int, nachricht: str, auch_datei: bool = True):
@@ -50,6 +51,8 @@ print("=" * 55)
 neue_bautraeger = 0
 if NUR_REPLIES:
     log(1, "Uebersprungen (--nur-replies)")
+elif OHNE_MAPS:
+    log(1, "Uebersprungen (--ohne-maps)")
 else:
     log_header("Schritt 1 startet: Neue Bautraeger recherchieren")
     try:
@@ -72,7 +75,8 @@ else:
         ergebnis = subprocess.run(
             [sys.executable, "tag15_bautraeger_agent.py"] + (["--test"] if TEST_MODUS else []),
             capture_output=False,
-            text=True
+            text=True,
+            env=os.environ.copy()
         )
         if ergebnis.returncode == 0:
             log(2, "Erfolgreich - Bautraeger bewertet, E-Mails gesendet, Sheet aktualisiert.")

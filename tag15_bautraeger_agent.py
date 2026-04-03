@@ -120,7 +120,7 @@ Antworte NUR mit einer Zahl zwischen 1 und 10.
 
         # Mallorca/Spanien unter 500.000 Euro: Score -2 (Neubauten selten unter 400k)
         region = str(firma.get("region", "")).lower()
-        budget = int(firma.get("budget", 400000) or 400000)
+        budget = int(os.environ.get("BUDGET_MAX") or firma.get("budget", 0) or 400000)
         if any(r in region for r in ["mallorca", "spanien"]) and budget < 500000:
             score = max(1, score - 2)
             print(f"   [REGEL] Mallorca/Spanien + Budget < 500k -> Score -2 (jetzt {score})")
@@ -429,9 +429,10 @@ if __name__ == "__main__":
             email_dict = generate_email(
                 bautraeger_name = firma["firma"],
                 region          = firma["region"],
-                zimmer          = int(firma.get("zimmer_min", 3)),
-                wohnflaeche_min = int(firma.get("wohnflaeche_min", 70)),
-                wohnflaeche_max = int(firma.get("wohnflaeche_max", 100)),
+                zimmer          = int(os.environ.get("ZIMMER_MIN") or firma.get("zimmer_min", 0) or 3),
+                wohnflaeche_min = int(os.environ.get("WOHNFLAECHE_MIN") or firma.get("wohnflaeche_min", 0) or 70),
+                wohnflaeche_max = int(os.environ.get("WOHNFLAECHE_MAX") or firma.get("wohnflaeche_max", 0) or 100),
+                budget          = int(os.environ.get("BUDGET_MAX") or firma.get("budget", 0) or 400000),
                 nur_neubau      = str(firma.get("nur_neubau", "True")).lower() in ("true", "1", "ja")
             )
 
