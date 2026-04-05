@@ -28,6 +28,18 @@ load_dotenv()
 app = Flask(__name__)
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
+LOG_DATEI = "agent_log.txt"
+
+
+def schreibe_log(eintrag: str):
+    """Haengt einen Eintrag mit Zeitstempel an agent_log.txt."""
+    try:
+        zeitstempel = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_DATEI, "a", encoding="utf-8") as f:
+            f.write(f"[{zeitstempel}] {eintrag}\n")
+    except Exception as e:
+        print(f"[WARNUNG] Log konnte nicht geschrieben werden: {e}")
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -56,6 +68,7 @@ def generiere_antwort(name: str, nachricht: str) -> str:
     absender_name = os.environ.get("ABSENDER_NAME", "NIO Automation")
     absender_email = os.environ.get("ABSENDER_EMAIL", "")
     absender_website = os.environ.get("ABSENDER_WEBSITE", "")
+    calendly_link = os.environ.get("CALENDLY_LINK", "")
 
     prompt = f"""Du bist ein professioneller Kundenberater fuer {absender_name}.
 Du hast folgende Kontaktanfrage erhalten:
@@ -63,11 +76,13 @@ Du hast folgende Kontaktanfrage erhalten:
 Name: {name}
 Nachricht: {nachricht}
 
-Schreibe eine kurze, professionelle und freundliche Antwort-E-Mail auf Deutsch, die:
-1. Den Namen der Person ({name}) verwendet und persoenlich anspricht
-2. Das Anliegen in einem Satz zusammenfasst
-3. Einen konkreten naechsten Schritt vorschlaegt (Telefontermin oder kurzes Gespraech buchen)
-4. Professionell und einladend klingt
+Schreibe eine Antwort-E-Mail auf Deutsch mit genau diesen Vorgaben:
+- Sprich {name} direkt mit Vornamen an
+- Fasse das konkrete Anliegen in einem Satz zusammen
+- Schlage vor: "Ich wuerde gerne einen kurzen Telefontermin vereinbaren"
+- Fuege den Calendly-Link ein: {calendly_link}
+- Maximal 5 Saetze gesamt
+- Professionell aber persoenlich
 
 Schreibe NUR den E-Mail-Text ohne Betreff und ohne Abschiedsformel.
 Die Signatur wird separat angehaengt."""
@@ -76,7 +91,7 @@ Die Signatur wird separat angehaengt."""
         antwort = openai_client.chat.completions.create(
             model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
+            max_tokens=250,
             temperature=0.7
         )
         text = antwort.choices[0].message.content.strip()
@@ -90,17 +105,51 @@ Die Signatur wird separat angehaengt."""
         return text + signatur
     except Exception as e:
         print(f"[FEHLER] OpenAI Anfrage fehlgeschlagen: {e}")
-        # Fallback-Antwort
+        schreibe_log(f"OPENAI-FEHLER fuer {name} ({e})")
+        # Standard-Fallback-Antwort
         return (
             f"Sehr geehrte/r {name},\n\n"
-            f"vielen Dank fuer Ihre Nachricht. Wir haben Ihre Anfrage erhalten "
-            f"und melden uns kurzfristig bei Ihnen.\n\n"
-            f"Gerne koennen Sie auch direkt einen Gespraechstermin vereinbaren.\n\n"
+            f"vielen Dank fuer Ihre Anfrage. Wir melden uns innerhalb von 24 Stunden bei Ihnen.\n\n"
             f"Mit freundlichen Gruessen\n"
             f"{os.environ.get('ABSENDER_NAME', 'NIO Automation')}\n"
             f"{os.environ.get('ABSENDER_EMAIL', '')}\n"
             f"{os.environ.get('ABSENDER_WEBSITE', '')}"
         )
+
+
+# ── Interner Alert bei Brevo-Fehler ──────────────────────────────────────────
+def _sende_anwalt_brevo_alert(interessent_name: str, interessent_email: str, fehler_info: str):
+    """Benachrichtigt den Anwalt wenn eine Antwort-E-Mail nicht gesendet werden konnte."""
+    anwalt_email = os.environ.get("ANWALT_EMAIL")
+    absender_name = os.environ.get("ABSENDER_NAME", "NIO Automation")
+    absender_email = os.environ.get("ABSENDER_EMAIL")
+    brevo_api_key = os.environ.get("BREVO_API_KEY")
+
+    if not anwalt_email or not brevo_api_key or not absender_email:
+        return
+
+    inhalt = (
+        f"ACHTUNG: E-Mail-Versand fehlgeschlagen – manuelles Eingreifen noetig!\n\n"
+        f"Interessent: {interessent_name}\n"
+        f"E-Mail:      {interessent_email}\n"
+        f"Zeitpunkt:   {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+        f"Fehler:\n{fehler_info}\n\n"
+        f"Bitte manuell antworten."
+    )
+    try:
+        requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": brevo_api_key, "Content-Type": "application/json"},
+            json={
+                "sender":  {"name": absender_name, "email": absender_email},
+                "to":      [{"email": anwalt_email}],
+                "subject": f"FEHLER: E-Mail an {interessent_name} nicht gesendet",
+                "textContent": inhalt
+            }
+        )
+        print(f"[OK] Anwalt ueber Brevo-Fehler informiert: {anwalt_email}")
+    except Exception as e:
+        print(f"[WARNUNG] Anwalt-Alert konnte nicht gesendet werden: {e}")
 
 
 # ── Schritt 2: Antwort per Brevo senden ──────────────────────────────────────
@@ -143,14 +192,76 @@ def sende_antwort_email(empfaenger_name: str, empfaenger_email: str, antwort_tex
             print(f"[OK] Antwort gesendet an: {empfaenger_name} ({empfaenger_email})")
             return True
         else:
-            print(f"[FEHLER] Brevo-Versand fehlgeschlagen (Status {r.status_code}): {r.text}")
+            fehler_info = f"Brevo Status {r.status_code}: {r.text[:200]}"
+            print(f"[FEHLER] Brevo-Versand fehlgeschlagen – {fehler_info}")
+            schreibe_log(f"BREVO-FEHLER fuer {empfaenger_name} ({empfaenger_email}): {fehler_info}")
+            _sende_anwalt_brevo_alert(empfaenger_name, empfaenger_email, fehler_info)
             return False
     except Exception as e:
-        print(f"[FEHLER] Brevo-Anfrage fehlgeschlagen: {e}")
+        fehler_info = str(e)
+        print(f"[FEHLER] Brevo-Anfrage fehlgeschlagen: {fehler_info}")
+        schreibe_log(f"BREVO-FEHLER fuer {empfaenger_name} ({empfaenger_email}): {fehler_info}")
+        _sende_anwalt_brevo_alert(empfaenger_name, empfaenger_email, fehler_info)
         return False
 
 
-# ── Schritt 3: Ins Google Sheet eintragen ────────────────────────────────────
+# ── Schritt 3: Anwalt benachrichtigen ────────────────────────────────────────
+def sende_anwalt_benachrichtigung(name: str, email: str, nachricht: str) -> bool:
+    """Sendet eine interne Benachrichtigung an den Anwalt bei neuer Kontaktanfrage."""
+    anwalt_email = os.environ.get("ANWALT_EMAIL")
+    absender_name = os.environ.get("ABSENDER_NAME", "NIO Automation")
+    absender_email = os.environ.get("ABSENDER_EMAIL")
+    brevo_api_key = os.environ.get("BREVO_API_KEY")
+
+    if not anwalt_email:
+        print("[INFO] ANWALT_EMAIL nicht gesetzt – Benachrichtigung uebersprungen.")
+        return False
+    if not brevo_api_key or not absender_email:
+        print("[FEHLER] BREVO_API_KEY oder ABSENDER_EMAIL fehlt fuer Anwalt-Benachrichtigung.")
+        return False
+
+    jetzt = datetime.now()
+    datum = jetzt.strftime("%d.%m.%Y")
+    uhrzeit = jetzt.strftime("%H:%M:%S")
+    anliegen_kurz = nachricht[:200].strip() + ("..." if len(nachricht) > 200 else "")
+
+    inhalt = (
+        f"Neue Kontaktanfrage eingegangen:\n\n"
+        f"Name:    {name}\n"
+        f"E-Mail:  {email}\n"
+        f"Datum:   {datum}\n"
+        f"Uhrzeit: {uhrzeit}\n\n"
+        f"Anliegen:\n{anliegen_kurz}\n\n"
+        f"---\n"
+        f"Automatische Antwort wurde bereits an {email} gesendet."
+    )
+
+    try:
+        r = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "api-key": brevo_api_key,
+                "Content-Type": "application/json"
+            },
+            json={
+                "sender":  {"name": absender_name, "email": absender_email},
+                "to":      [{"email": anwalt_email}],
+                "subject": f"Neue Anfrage von {name}",
+                "textContent": inhalt
+            }
+        )
+        if r.status_code in (200, 201):
+            print(f"[OK] Anwalt benachrichtigt: {anwalt_email}")
+            return True
+        else:
+            print(f"[FEHLER] Anwalt-Benachrichtigung fehlgeschlagen (Status {r.status_code}): {r.text}")
+            return False
+    except Exception as e:
+        print(f"[FEHLER] Anwalt-Benachrichtigung fehlgeschlagen: {e}")
+        return False
+
+
+# ── Schritt 4: Ins Google Sheet eintragen ────────────────────────────────────
 def sheet_eintragen(sheet, name: str, email: str, nachricht: str, status: str = "BEANTWORTET"):
     """Traegt den Kontakt mit Zeitstempel ins Google Sheet ein."""
     if sheet is None:
@@ -213,13 +324,22 @@ def kontakt_webhook():
         print(f"[FEHLER] Eingabe-Validierung fehlgeschlagen: {e}")
         return jsonify({"status": "fehler", "nachricht": "Ungueltige Anfrage."}), 400
 
-    # Schritt 1: Antwort generieren
+    # Schritt 1: Antwort generieren (bei Fehler: Fallback-Text, kein Abbruch)
     try:
         antwort_text = generiere_antwort(name, nachricht)
         print(f"[OK] Antwort generiert ({len(antwort_text)} Zeichen)")
     except Exception as e:
         print(f"[FEHLER] Antwort-Generierung fehlgeschlagen: {e}")
-        return jsonify({"status": "fehler", "nachricht": "Antwort konnte nicht generiert werden."}), 500
+        schreibe_log(f"OPENAI-FEHLER fuer {name} ({e})")
+        absender_name = os.environ.get("ABSENDER_NAME", "NIO Automation")
+        antwort_text = (
+            f"Sehr geehrte/r {name},\n\n"
+            f"vielen Dank fuer Ihre Anfrage. Wir melden uns innerhalb von 24 Stunden bei Ihnen.\n\n"
+            f"Mit freundlichen Gruessen\n"
+            f"{absender_name}\n"
+            f"{os.environ.get('ABSENDER_EMAIL', '')}\n"
+            f"{os.environ.get('ABSENDER_WEBSITE', '')}"
+        )
 
     # Schritt 2: E-Mail senden
     try:
@@ -230,7 +350,13 @@ def kontakt_webhook():
         gesendet = False
         email_status = "FEHLER_EMAIL"
 
-    # Schritt 3: Sheet-Eintrag
+    # Schritt 3: Anwalt benachrichtigen
+    try:
+        sende_anwalt_benachrichtigung(name, email, nachricht)
+    except Exception as e:
+        print(f"[FEHLER] Anwalt-Benachrichtigung fehlgeschlagen: {e}")
+
+    # Schritt 4: Sheet-Eintrag
     try:
         sheet = sheets_verbinden()
         sheet_eintragen(sheet, name, email, nachricht, email_status)
