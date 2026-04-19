@@ -17,3 +17,9 @@ CLAUDE.md
 
 # Lokale Log-Datei
 agent_log.txt
+
+.trigger
+
+# Node.js
+node_modules/
+buchhalter-agent/node_modules/
