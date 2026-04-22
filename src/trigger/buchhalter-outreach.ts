@@ -17,8 +17,8 @@ function fetchMitTimeout(url: string, options?: RequestInit, timeoutMs = 30000):
 }
 
 function getGoogleAuth() {
-  const credentialsJson = process.env.GOOGLE_CREDENTIALS_JSON;
-  if (!credentialsJson) throw new Error("GOOGLE_CREDENTIALS_JSON fehlt");
+  const credentialsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!credentialsJson) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON fehlt");
   const credentials = JSON.parse(credentialsJson);
   return new GoogleAuth({
     credentials,
@@ -33,8 +33,8 @@ async function getSheet() {
   console.log("Google Sheets Auth wird initialisiert...");
   const auth = getGoogleAuth();
   const sheets = googleSheets({ version: "v4", auth });
-  const sheetId = process.env.KONTAKT_SHEET_ID;
-  if (!sheetId) throw new Error("KONTAKT_SHEET_ID fehlt");
+  const sheetId = process.env.GOOGLE_SHEET_ID;
+  if (!sheetId) throw new Error("GOOGLE_SHEET_ID fehlt");
   return { sheets, sheetId };
 }
 
@@ -43,7 +43,7 @@ async function ladeVorhandeneEintraege(
   sheetId: string
 ): Promise<{ firmen: Set<string>; heuteKontaktiert: number }> {
   console.log("Lade bestehende Einträge aus Google Sheets...");
-  const heute = new Date().toLocaleDateString("de-DE");
+  const heute = new Date().toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric" });
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: "Buchhalter Outreach!A:F",
@@ -140,18 +140,20 @@ async function generiereEmail(firma: string, stadt: string): Promise<string> {
     messages: [
       {
         role: "user",
-        content: `Schreibe eine professionelle Outreach-E-Mail für NIO Automation an die Kanzlei "${firma}" in ${stadt}.
+        content: `Schreibe eine kurze E-Mail an die Kanzlei "${firma}" in ${stadt}.
 
-Beginne mit: "Sehr geehrte Damen und Herren von ${firma},"
+Struktur (exakt so):
+1. Beginne mit: "Sehr geehrte Damen und Herren von ${firma},"
+2. Absatz 1: Erkläre dass unser System täglich automatisch neue Firmengründungen findet und im Namen der Kanzlei anschreibt – ohne Zeitaufwand für die Kanzlei.
+3. Absatz 2: "Buchhalter die dieses System nutzen gewinnen durchschnittlich 3-5 neue Mandanten pro Monat."
+4. Absatz 3: "Wären Sie offen für ein 15-minütiges Gespräch, um zu sehen ob das für Ihre Kanzlei passt?"
 
-Struktur:
-Absatz 1: Konkreter Nutzen — erwähne explizit "bis zu 10 neue Mandantenkontakte täglich, vollautomatisch ohne Zeitaufwand für Sie".
-Absatz 2: Was der KI-Agent konkret macht — er schreibt und versendet personalisierte E-Mails an potenzielle Mandanten, während die Kanzlei sich auf ihre eigentliche Arbeit konzentriert.
-Absatz 3 (exakt so übernehmen): "Antworten Sie einfach auf diese E-Mail und wir vereinbaren einen kurzen 15-Minuten-Termin – kostenlos und unverbindlich."
-
-Sprache: Deutsch. Ton: professionell aber persönlich.
-Füge KEINE Signatur, KEINE Verabschiedung und KEINEN Betreff hinzu.
-Prüfe den Text auf korrekte Rechtschreibung und Grammatik. Kein Wort darf Tippfehler oder doppelte Buchstaben enthalten.`,
+Regeln:
+- Maximal 5 Sätze insgesamt
+- Ton: direkt, professionell, menschlich
+- Verbotene Wörter: innovativ, KI-Agent, Lösung, revolutionär, optimieren, skalieren
+- Füge KEINE Signatur, KEINE Verabschiedung und KEINEN Betreff hinzu
+- Sprache: Deutsch`,
       },
     ],
   });
@@ -208,8 +210,8 @@ async function trackingEintrag(
   betreff: string
 ): Promise<void> {
   const jetzt = new Date();
-  const datum = jetzt.toLocaleDateString("de-DE");
-  const uhrzeit = jetzt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const datum = jetzt.toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric" });
+  const uhrzeit = jetzt.toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" });
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,

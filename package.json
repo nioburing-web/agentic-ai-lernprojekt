@@ -1,0 +1,32 @@
+{
+  "name": "agentic-ai-lernprojekt",
+  "version": "1.0.0",
+  "description": "Mein persönliches 90-Tage-Lernprojekt um Agentic AI zu lernen\r und ein eigenes AI-Business aufzubauen.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nioburing-web/agentic-ai-lernprojekt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/nioburing-web/agentic-ai-lernprojekt/issues"
+  },
+  "homepage": "https://github.com/nioburing-web/agentic-ai-lernprojekt#readme",
+  "dependencies": {
+    "@trigger.dev/sdk": "4.4.4",
+    "openai": "^4.0.0",
+    "axios": "^1.6.0",
+    "@googleapis/sheets": "^9.0.0",
+    "google-auth-library": "^9.0.0",
+    "imapflow": "^1.0.0"
+  },
+  "devDependencies": {
+    "@trigger.dev/build": "4.4.4"
+  }
+}
