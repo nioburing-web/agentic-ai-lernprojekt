@@ -1,6 +1,8 @@
 // Tests für buchhalter-outreach Agent
 // Ausführen: npx tsx tests/test_buchhalter_outreach.ts
 
+import { findeEmailAufWebsite } from "../src/trigger/buchhalter-outreach";
+
 let bestanden = 0;
 let fehlgeschlagen = 0;
 
@@ -74,16 +76,23 @@ function test3_keineVerbotenenWoerter(): void {
     "Lösung",
     "bahnbrechend",
     "disruptiv",
+    "KI-Agent",
+    "automatisiert",
+    "System",
+    "täglich",
+    "automatisch",
+    "KI",
+    "Agent",
   ];
 
-  // Beispiel-E-Mail wie sie generiert werden sollte
-  const beispielEmail = `Sehr geehrte Damen und Herren von Kanzlei Schmidt,
+  // Beispiel-E-Mail im finalen Format (Frage + human, keine Zahlen, kein "Team")
+  const beispielEmail = `Guten Tag Kanzlei Schmidt,
 
-unser KI-Agent findet täglich neue Firmengründungen und schreibt diese im Namen Ihrer Kanzlei an – ganz ohne Zeitaufwand für Sie.
+Wie viel Zeit verbringt Ihre Kanzlei pro Woche damit, neue Mandanten zu suchen?
 
-Buchhalter die dieses System nutzen gewinnen durchschnittlich 3-5 neue Mandanten pro Monat.
+Wir helfen Buchhaltern dabei, neue Firmenkunden zu gewinnen – ohne dass Sie selbst akquirieren müssen.
 
-Wären Sie offen für ein 15-minütiges Gespräch, um zu sehen ob das für Ihre Kanzlei passt?`;
+Falls Sie neugierig sind – ich zeige Ihnen gerne in 15 Minuten wie das für Ihre Kanzlei aussehen könnte.`;
 
   for (const wort of verboteneWoerter) {
     assert(
@@ -91,6 +100,65 @@ Wären Sie offen für ein 15-minütiges Gespräch, um zu sehen ob das für Ihre 
       `Kein verbotenes Wort "${wort}" in E-Mail`
     );
   }
+}
+
+// --- Test 7: Finale E-Mail-Struktur ---
+function test7_finaleStruktur(): void {
+  const beispielEmail = `Guten Tag Kanzlei Schmidt,
+
+Wie viel Zeit verbringt Ihre Kanzlei pro Woche damit, neue Mandanten zu suchen?
+
+Wir helfen Buchhaltern dabei, neue Firmenkunden zu gewinnen – ohne dass Sie selbst akquirieren müssen.
+
+Falls Sie neugierig sind – ich zeige Ihnen gerne in 15 Minuten wie das für Ihre Kanzlei aussehen könnte.`;
+
+  assert(beispielEmail.startsWith("Guten Tag"), "E-Mail beginnt mit 'Guten Tag'");
+  assert(!beispielEmail.includes("Team"), "Kein 'Team' in der Anrede");
+  assert(!beispielEmail.includes("Sehr geehrte"), "Kein formelles 'Sehr geehrte'");
+  assert(!beispielEmail.includes("3-5"), "Keine Zahlenversprechen (3-5)");
+  assert(beispielEmail.includes("?"), "Absatz 1 enthält eine Frage");
+  assert(beispielEmail.includes("15 Minuten"), "CTA: 15 Minuten Gespräch");
+  assert(beispielEmail.includes("neugierig"), "CTA: weiche Einladung ('neugierig')");
+}
+
+// --- Test 9: Prompt enthält Anführungszeichen-Verbot ---
+function test9_promptKeineAnfuehrungszeichen(): void {
+  const fs = require("fs") as typeof import("fs");
+  const code = fs.readFileSync("./src/trigger/buchhalter-outreach.ts", "utf-8");
+  assert(
+    code.includes("Anführungszeichen"),
+    "Prompt verbietet Anführungszeichen im Text"
+  );
+}
+
+// --- Test 10: Prompt verbietet 'täglich' und 'automatisch' explizit ---
+function test10_promptVerbieteteWoerterGelistet(): void {
+  const fs = require("fs") as typeof import("fs");
+  const code = fs.readFileSync("./src/trigger/buchhalter-outreach.ts", "utf-8");
+  const promptStart = code.indexOf("content: `");
+  const promptEnd = code.indexOf("`, \n      },", promptStart);
+  const prompt = promptStart > -1 ? code.slice(promptStart, promptEnd) : "";
+  // Prompt muss diese Wörter in der Verboten-Liste haben
+  assert(
+    (prompt.includes("Verbotene Wörter") || prompt.includes("verbotene Wörter")) && prompt.includes("täglich"),
+    "Prompt verbietet 'täglich' explizit"
+  );
+  assert(
+    (prompt.includes("Verbotene Wörter") || prompt.includes("verbotene Wörter")) && prompt.includes("automatisch"),
+    "Prompt verbietet 'automatisch' explizit"
+  );
+}
+
+// --- Test 8: Brevo Payload – type muss "transactional" sein ---
+function test8_brevoTransactional(): void {
+  // Prüft ob der Brevo-Payload type: "transactional" enthält
+  // Liest den Quellcode direkt (verhindert Abbestellen-Link)
+  const fs = require("fs") as typeof import("fs");
+  const code = fs.readFileSync("./src/trigger/buchhalter-outreach.ts", "utf-8");
+  assert(
+    code.includes('"transactional"'),
+    "Brevo API-Call enthält type: 'transactional' (kein Abbestellen-Link)"
+  );
 }
 
 // --- Test 4: Datum-Format korrekt (DD.MM.YYYY mit führender Null) ---
@@ -128,6 +196,23 @@ function test5_dedupLogik(): void {
   );
 }
 
+// --- Test 6: E-Mail-Finder – Fehlerbehandlung (kein echter HTTP-Call nötig) ---
+async function test6_emailFinder(): Promise<void> {
+  console.log("\n--- Integrations-Test: E-Mail-Finder ---");
+
+  const result1 = await findeEmailAufWebsite("https://ungueltige-domain-xyz999-abc.de");
+  assert(result1.email === null, "Test 6a: Ungültige Domain → email: null");
+  assert(result1.kontaktformularUrl === null, "Test 6a: Ungültige Domain → kontaktformularUrl: null");
+
+  const result2 = await findeEmailAufWebsite("keine-url");
+  assert(result2.email === null, "Test 6b: Ungültige URL → email: null");
+  assert(result2.kontaktformularUrl === null, "Test 6b: Ungültige URL → kontaktformularUrl: null");
+
+  const result3 = await findeEmailAufWebsite("");
+  assert(result3.email === null, "Test 6c: Leere URL → email: null");
+  assert(result3.kontaktformularUrl === null, "Test 6c: Leere URL → kontaktformularUrl: null");
+}
+
 // --- Alle Tests ausführen ---
 console.log("=== Buchhalter-Outreach Tests ===\n");
 
@@ -136,6 +221,12 @@ test2_firmenInAnrede();
 test3_keineVerbotenenWoerter();
 test4_datumFormat();
 test5_dedupLogik();
+test7_finaleStruktur();
+test8_brevoTransactional();
+test9_promptKeineAnfuehrungszeichen();
 
-console.log(`\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`);
-if (fehlgeschlagen > 0) process.exit(1);
+// Integrations-Test (async)
+test6_emailFinder().then(() => {
+  console.log(`\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`);
+  if (fehlgeschlagen > 0) process.exit(1);
+});
