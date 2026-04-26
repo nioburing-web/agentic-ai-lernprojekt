@@ -213,6 +213,23 @@ async function test6_emailFinder(): Promise<void> {
   assert(result3.kontaktformularUrl === null, "Test 6c: Leere URL → kontaktformularUrl: null");
 }
 
+async function test11_formularErkennung(): Promise<void> {
+  console.log("\n--- Test: Kontaktformular-Erkennung ---");
+
+  // Strukturprüfung: Funktion gibt immer beide Felder zurück
+  const result = await findeEmailAufWebsite("https://ungueltige-domain-xyz999-abc.de");
+  assert("email" in result, "Test 11a: Rückgabe hat 'email'-Feld");
+  assert("kontaktformularUrl" in result, "Test 11b: Rückgabe hat 'kontaktformularUrl'-Feld");
+  assert(
+    result.email === null || typeof result.email === "string",
+    "Test 11c: email ist null oder string"
+  );
+  assert(
+    result.kontaktformularUrl === null || typeof result.kontaktformularUrl === "string",
+    "Test 11d: kontaktformularUrl ist null oder string"
+  );
+}
+
 // --- Alle Tests ausführen ---
 console.log("=== Buchhalter-Outreach Tests ===\n");
 
@@ -226,7 +243,8 @@ test8_brevoTransactional();
 test9_promptKeineAnfuehrungszeichen();
 
 // Integrations-Test (async)
-test6_emailFinder().then(() => {
+test6_emailFinder().then(async () => {
+  await test11_formularErkennung();
   console.log(`\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`);
   if (fehlgeschlagen > 0) process.exit(1);
 });

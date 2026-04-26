@@ -225,6 +225,42 @@ export async function findeEmailAufWebsite(
     if (!IGNORIERTE_PREFIXES.has(prefix)) return { email, kontaktformularUrl: null };
   }
 
+  // Kontaktformular suchen wenn keine E-Mail gefunden
+  const formularSeiten = [
+    `${baseUrl}/kontakt`,
+    `${baseUrl}/contact`,
+    baseUrl,
+  ];
+
+  for (const seite of formularSeiten) {
+    let inhalt: string;
+    try {
+      const res = await fetchMitTimeout(seite, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        },
+      }, 5000);
+      if (!res.ok) continue;
+      inhalt = await res.text();
+    } catch {
+      continue;
+    }
+
+    // Prüfe ob Seite ein Formular mit Nachrichtenfeld enthält
+    const hatFormular =
+      inhalt.includes("<form") &&
+      (inhalt.toLowerCase().includes("textarea") ||
+        inhalt.toLowerCase().includes('type="email"') ||
+        inhalt.toLowerCase().includes('name="nachricht"') ||
+        inhalt.toLowerCase().includes('name="message"'));
+
+    if (hatFormular) {
+      console.log(`Kontaktformular gefunden auf: ${seite}`);
+      return { email: null, kontaktformularUrl: seite };
+    }
+  }
+
   return { email: null, kontaktformularUrl: null };
 }
 
