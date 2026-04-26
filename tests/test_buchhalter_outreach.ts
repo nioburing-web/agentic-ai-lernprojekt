@@ -19,7 +19,7 @@ function assert(bedingung: boolean, nachricht: string): void {
 // --- Hilfsfunktionen aus buchhalter-outreach extrahiert (zum Testen) ---
 
 function generiereBetreff(firmaName: string): string {
-  return `KI-Agent für neue Mandanten – ${firmaName}`;
+  return `Neue Mandanten für ${firmaName} – ohne eigenen Aufwand`;
 }
 
 function generiereSignatur(): string {
@@ -39,14 +39,14 @@ function formatiereTrackingDatum(datum: Date): string {
   });
 }
 
-// --- Test 1: E-Mail-Betreff enthält Firmennamen und KI-Agent ---
+// --- Test 1: E-Mail-Betreff enthält Firmennamen und neues Format ---
 function test1_betreffsFormat(): void {
   const firma = "Steuerberater Müller GmbH";
   const betreff = generiereBetreff(firma);
 
   assert(betreff.includes(firma), "Betreff enthält Firmennamen");
-  assert(betreff.includes("KI-Agent"), "Betreff enthält 'KI-Agent'");
-  assert(betreff.startsWith("KI-Agent für neue Mandanten"), "Betreff beginnt korrekt");
+  assert(betreff.includes("Neue Mandanten"), "Betreff enthält 'Neue Mandanten'");
+  assert(betreff.startsWith("Neue Mandanten für"), "Betreff beginnt korrekt");
 }
 
 // --- Test 2: Firmenname in Anrede prüfen ---
@@ -58,7 +58,7 @@ function test2_firmenInAnrede(): void {
   ];
 
   for (const fall of testFaelle) {
-    const anrede = `Sehr geehrte Damen und Herren von ${fall.firma},`;
+    const anrede = `Guten Tag ${fall.firma} Team,`;
     assert(
       anrede.includes(fall.erwartetInAnrede),
       `Anrede enthält Firmennamen: ${fall.firma}`
@@ -104,21 +104,21 @@ Falls Sie neugierig sind – ich zeige Ihnen gerne in 15 Minuten wie das für Ih
 
 // --- Test 7: Finale E-Mail-Struktur ---
 function test7_finaleStruktur(): void {
-  const beispielEmail = `Guten Tag Kanzlei Schmidt,
+  const beispielEmail = `Guten Tag Kanzlei Schmidt Team,
 
-Wie viel Zeit verbringt Ihre Kanzlei pro Woche damit, neue Mandanten zu suchen?
+Mandantengewinnung kostet Zeit die man als Buchhalter eigentlich kaum hat.
+Wer neue Mandanten gewinnen will, braucht dafür Zeit die im Alltag fehlt.
 
-Wir helfen Buchhaltern dabei, neue Firmenkunden zu gewinnen – ohne dass Sie selbst akquirieren müssen.
+Ich helfe Kanzleien dabei neue Mandanten zu gewinnen ohne selbst Zeit dafür investieren zu müssen.
+Das klingt vielleicht ungewöhnlich – aber ich zeige es Ihnen gerne konkret.
 
-Falls Sie neugierig sind – ich zeige Ihnen gerne in 15 Minuten wie das für Ihre Kanzlei aussehen könnte.`;
+Ich zeige Ihnen live wie es funktioniert – Sie entscheiden dann selbst ob es passt.`;
 
   assert(beispielEmail.startsWith("Guten Tag"), "E-Mail beginnt mit 'Guten Tag'");
-  assert(!beispielEmail.includes("Team"), "Kein 'Team' in der Anrede");
+  assert(beispielEmail.includes("Team"), "Anrede enthält 'Team'");
   assert(!beispielEmail.includes("Sehr geehrte"), "Kein formelles 'Sehr geehrte'");
   assert(!beispielEmail.includes("3-5"), "Keine Zahlenversprechen (3-5)");
-  assert(beispielEmail.includes("?"), "Absatz 1 enthält eine Frage");
-  assert(beispielEmail.includes("15 Minuten"), "CTA: 15 Minuten Gespräch");
-  assert(beispielEmail.includes("neugierig"), "CTA: weiche Einladung ('neugierig')");
+  assert(beispielEmail.includes("15 Minuten") || beispielEmail.includes("entscheiden dann selbst"), "CTA vorhanden");
 }
 
 // --- Test 9: Prompt enthält Anführungszeichen-Verbot ---
