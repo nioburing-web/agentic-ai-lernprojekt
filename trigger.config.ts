@@ -1,4 +1,5 @@
-import { defineConfig } from "@trigger.dev/sdk/v3";
+import { defineConfig } from "@trigger.dev/sdk";
+import { playwright } from "@trigger.dev/build/extensions/playwright";
 
 export default defineConfig({
   project: "proj_lklwvtuximzshfgzecbu",
@@ -19,4 +20,9 @@ export default defineConfig({
     },
   },
   dirs: ["./src/trigger"],
+  build: {
+    extensions: [
+      playwright({ browsers: ["chromium"] }),
+    ],
+  },
 });
