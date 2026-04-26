@@ -149,6 +149,25 @@ function test10_promptVerbieteteWoerterGelistet(): void {
   );
 }
 
+// --- Test 12: generiereEmail hat viaKontaktformular Parameter ---
+function test12_viaKontaktformularPrompt(): void {
+  const fs = require("fs") as typeof import("fs");
+  const code = fs.readFileSync("./src/trigger/buchhalter-outreach.ts", "utf-8");
+
+  assert(
+    code.includes("viaKontaktformular"),
+    "Test 12a: generiereEmail hat viaKontaktformular Parameter"
+  );
+  assert(
+    code.includes("Übrigens"),
+    "Test 12b: Extra-Satz 'Übrigens' ist im Code vorhanden"
+  );
+  assert(
+    code.includes("auf Anfragen zu antworten"),
+    "Test 12c: Extra-Satz-Inhalt ist korrekt"
+  );
+}
+
 // --- Test 8: Brevo Payload – type muss "transactional" sein ---
 function test8_brevoTransactional(): void {
   // Prüft ob der Brevo-Payload type: "transactional" enthält
@@ -241,6 +260,7 @@ test5_dedupLogik();
 test7_finaleStruktur();
 test8_brevoTransactional();
 test9_promptKeineAnfuehrungszeichen();
+test12_viaKontaktformularPrompt();
 
 // Integrations-Test (async)
 test6_emailFinder().then(async () => {

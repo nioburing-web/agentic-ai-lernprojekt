@@ -264,13 +264,22 @@ export async function findeEmailAufWebsite(
   return { email: null, kontaktformularUrl: null };
 }
 
-async function generiereEmail(firma: string, stadt: string): Promise<string> {
-  console.log(`Generiere E-Mail für: ${firma}`);
+async function generiereEmail(
+  firma: string,
+  stadt: string,
+  viaKontaktformular: boolean
+): Promise<string> {
+  console.log(`Generiere E-Mail für: ${firma} (via Kontaktformular: ${viaKontaktformular})`);
   const openai = getOpenAI();
+
+  const extraSatz = viaKontaktformular
+    ? `\n\nAbsatz 4 – Optionaler Zusatz (NUR bei Kontaktformular anhängen):\nÜbrigens – falls Sie merken dass Sie selbst länger brauchen um auf Anfragen zu antworten: genau dafür habe ich ebenfalls eine Lösung.`
+    : "";
+
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     temperature: 0.8,
-    max_tokens: 400,
+    max_tokens: 450,
     messages: [
       {
         role: "user",
@@ -291,10 +300,10 @@ Satz 3: Erkläre kurz, wie du Kanzleien hilfst neue Mandanten zu gewinnen ohne d
 Satz 4: Klingt wie ein Freund der etwas empfiehlt – kein Versprechen, keine Zahlen.
 
 Absatz 3 – 1 Satz – Weicher Call to Action:
-Satz 5: Lade zu einem 15-Minuten-Gespräch ein. Kein Druck. Sinngemäß: Ich zeige Ihnen live wie es funktioniert – Sie entscheiden dann selbst ob es passt.
+Satz 5: Lade zu einem 15-Minuten-Gespräch ein. Kein Druck. Sinngemäß: Ich zeige Ihnen live wie es funktioniert – Sie entscheiden dann selbst ob es passt.${extraSatz}
 
 Regeln:
-- Exakt 5 Sätze insgesamt (2 + 2 + 1), nicht mehr, nicht weniger
+- Exakt 5 Sätze in den ersten drei Absätzen (2 + 2 + 1), nicht mehr, nicht weniger
 - Durchgehend Ich-Perspektive – kein Firmenname im Text
 - Locker und menschlich – wie eine einzelne Person schreibt, nicht wie Marketing
 - Keine Anführungszeichen im Text
@@ -483,7 +492,7 @@ export const buchhalterOutreach = schedules.task({
       const betreff = `Neue Mandanten für ${firma.name} – ohne eigenen Aufwand`;
       let emailInhalt: string;
       try {
-        emailInhalt = await generiereEmail(firma.name, zielstadt);
+        emailInhalt = await generiereEmail(firma.name, zielstadt, false);
       } catch (err) {
         console.error(`OpenAI Fehler für ${firma.name}:`, err);
         continue;
