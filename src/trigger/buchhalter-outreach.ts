@@ -614,8 +614,6 @@ export const buchhalterOutreach = schedules.task({
         continue;
       }
 
-      if (!gesendet) continue;
-
       // 5 Sekunden Pause zwischen Versand (Brevo Rate-Limit)
       await wait.for({ seconds: 5 });
 
