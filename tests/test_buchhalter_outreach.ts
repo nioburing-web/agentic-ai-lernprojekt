@@ -149,6 +149,29 @@ function test10_promptVerbieteteWoerterGelistet(): void {
   );
 }
 
+// --- Test 13: fuellKontaktformular Funktion existiert ---
+function test13_fuellKontaktformularExistiert(): void {
+  const fs = require("fs") as typeof import("fs");
+  const code = fs.readFileSync("./src/trigger/buchhalter-outreach.ts", "utf-8");
+
+  assert(
+    code.includes("async function fuellKontaktformular"),
+    "Test 13a: fuellKontaktformular Funktion existiert"
+  );
+  assert(
+    code.includes("chromium"),
+    "Test 13b: Playwright chromium wird verwendet"
+  );
+  assert(
+    code.includes("g-recaptcha"),
+    "Test 13c: CAPTCHA-Erkennung ist implementiert"
+  );
+  assert(
+    code.includes("ABSENDER_NAME"),
+    "Test 13d: ABSENDER_NAME Env-Var wird verwendet"
+  );
+}
+
 // --- Test 12: generiereEmail hat viaKontaktformular Parameter ---
 function test12_viaKontaktformularPrompt(): void {
   const fs = require("fs") as typeof import("fs");
@@ -261,6 +284,7 @@ test7_finaleStruktur();
 test8_brevoTransactional();
 test9_promptKeineAnfuehrungszeichen();
 test12_viaKontaktformularPrompt();
+test13_fuellKontaktformularExistiert();
 
 // Integrations-Test (async)
 test6_emailFinder().then(async () => {

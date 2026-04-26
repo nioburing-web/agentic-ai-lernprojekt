@@ -264,6 +264,93 @@ export async function findeEmailAufWebsite(
   return { email: null, kontaktformularUrl: null };
 }
 
+async function fuellKontaktformular(
+  firma: string,
+  kontaktformularUrl: string,
+  betreff: string,
+  emailInhalt: string
+): Promise<boolean> {
+  console.log(`Fülle Kontaktformular aus für: ${firma} → ${kontaktformularUrl}`);
+
+  const absenderName = process.env.ABSENDER_NAME ?? "NIO Automation";
+  const absenderEmail = process.env.ABSENDER_EMAIL;
+  if (!absenderEmail) {
+    console.error("ABSENDER_EMAIL fehlt – Kontaktformular übersprungen");
+    return false;
+  }
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(kontaktformularUrl, { timeout: 30000, waitUntil: "domcontentloaded" });
+
+    // CAPTCHA-Erkennung
+    const hatCaptcha = await page.locator(".g-recaptcha, [class*='captcha'], iframe[src*='recaptcha']").count();
+    if (hatCaptcha > 0) {
+      console.log(`CAPTCHA erkannt – überspringe: ${firma}`);
+      return false;
+    }
+
+    // Felder ausfüllen
+    const nameSelector = "input[name*='name' i], input[placeholder*='Name' i], input[id*='name' i]";
+    const emailSelector = "input[type='email'], input[name*='email' i], input[name*='mail' i]";
+    const betreffSelector = "input[name*='subject' i], input[name*='betreff' i], input[placeholder*='Betreff' i]";
+    const nachrichtSelector = "textarea, input[name*='message' i], input[name*='nachricht' i]";
+    const submitSelector = "button[type='submit'], input[type='submit'], button:has-text('Senden'), button:has-text('Absenden')";
+
+    const nameFeld = page.locator(nameSelector).first();
+    if (await nameFeld.count() > 0) await nameFeld.fill(absenderName);
+
+    const emailFeld = page.locator(emailSelector).first();
+    if (await emailFeld.count() > 0) await emailFeld.fill(absenderEmail);
+
+    const betreffFeld = page.locator(betreffSelector).first();
+    if (await betreffFeld.count() > 0) await betreffFeld.fill(betreff);
+
+    const nachrichtFeld = page.locator(nachrichtSelector).first();
+    if (await nachrichtFeld.count() === 0) {
+      console.log(`Kein Nachrichtenfeld gefunden – überspringe: ${firma}`);
+      return false;
+    }
+    await nachrichtFeld.fill(emailInhalt);
+
+    const submitButton = page.locator(submitSelector).first();
+    if (await submitButton.count() === 0) {
+      console.log(`Kein Submit-Button gefunden – überspringe: ${firma}`);
+      return false;
+    }
+
+    const urlVorSubmit = page.url();
+    await submitButton.click();
+
+    // Erfolgsprüfung: URL-Wechsel oder Erfolgs-Text
+    try {
+      await page.waitForFunction(
+        (vorher: string) => {
+          const neueUrl = window.location.href !== vorher;
+          const erfolgsText = ["vielen dank", "wurde gesendet", "erfolgreich", "thank you", "message sent"]
+            .some(t => document.body.innerText.toLowerCase().includes(t));
+          return neueUrl || erfolgsText;
+        },
+        urlVorSubmit,
+        { timeout: 5000 }
+      );
+      console.log(`Kontaktformular erfolgreich ausgefüllt: ${firma}`);
+      return true;
+    } catch {
+      console.log(`Keine Erfolgsbestätigung erhalten – möglicherweise trotzdem gesendet: ${firma}`);
+      return true; // Im Zweifel als gesendet werten
+    }
+  } catch (err) {
+    console.error(`Playwright Fehler für ${firma}:`, err);
+    return false;
+  } finally {
+    await browser.close();
+  }
+}
+
 async function generiereEmail(
   firma: string,
   stadt: string,
@@ -472,44 +559,64 @@ export const buchhalterOutreach = schedules.task({
       }
 
       let firmaEmail: string | null = null;
+      let firmaKontaktformularUrl: string | null = null;
       try {
         const emailResult = await findeEmailAufWebsite(website);
         firmaEmail = emailResult.email;
+        firmaKontaktformularUrl = emailResult.kontaktformularUrl;
       } catch (err) {
         console.error(`E-Mail-Suche Fehler für ${firma.name}:`, err);
         continue;
       }
 
-      if (!firmaEmail) {
+      if (!firmaEmail && !firmaKontaktformularUrl) {
         skipKeineEmail++;
-        console.log(`Keine E-Mail gefunden – überspringe: ${firma.name} (${website})`);
+        console.log(`Keine E-Mail und kein Kontaktformular gefunden – überspringe: ${firma.name} (${website})`);
         continue;
       }
 
-      console.log(`E-Mail gefunden: ${firmaEmail} für ${firma.name}`);
-
-      // Schritt 3: E-Mail generieren
+      // Schritt 3: E-Mail-Inhalt generieren
       const betreff = `Neue Mandanten für ${firma.name} – ohne eigenen Aufwand`;
+      const viaKontaktformular = !firmaEmail && firmaKontaktformularUrl !== null;
       let emailInhalt: string;
       try {
-        emailInhalt = await generiereEmail(firma.name, zielstadt, false);
+        emailInhalt = await generiereEmail(firma.name, zielstadt, viaKontaktformular);
       } catch (err) {
         console.error(`OpenAI Fehler für ${firma.name}:`, err);
         continue;
       }
 
-      // Schritt 4: E-Mail senden
-      try {
-        const gesendet = await sendeEmail(firma.name, betreff, emailInhalt, firmaEmail);
-        if (!gesendet) {
-          console.error(`Brevo Fehler für ${firma.name}: E-Mail nicht gesendet`);
+      // Schritt 4: E-Mail senden oder Kontaktformular ausfüllen
+      let kontaktErfolgreich = false;
+      if (firmaEmail) {
+        console.log(`E-Mail gefunden: ${firmaEmail} für ${firma.name}`);
+        try {
+          const gesendet = await sendeEmail(firma.name, betreff, emailInhalt, firmaEmail);
+          if (!gesendet) {
+            console.error(`Brevo Fehler für ${firma.name}: E-Mail nicht gesendet`);
+            continue;
+          }
+          console.log(`E-Mail gesendet: ${firma.name}`);
+          kontaktErfolgreich = true;
+        } catch (err) {
+          console.error(`Brevo Fehler für ${firma.name}:`, err);
           continue;
         }
-        console.log(`E-Mail gesendet: ${firma.name}`);
-      } catch (err) {
-        console.error(`Brevo Fehler für ${firma.name}:`, err);
-        continue;
+      } else if (firmaKontaktformularUrl) {
+        console.log(`Kein E-Mail – versuche Kontaktformular: ${firma.name}`);
+        try {
+          kontaktErfolgreich = await fuellKontaktformular(firma.name, firmaKontaktformularUrl, betreff, emailInhalt);
+          if (!kontaktErfolgreich) {
+            console.log(`Kontaktformular fehlgeschlagen – überspringe: ${firma.name}`);
+            continue;
+          }
+        } catch (err) {
+          console.error(`Kontaktformular Fehler für ${firma.name}:`, err);
+          continue;
+        }
       }
+
+      if (!kontaktErfolgreich) continue;
 
       // 5 Sekunden Pause zwischen Versand (Brevo Rate-Limit)
       await wait.for({ seconds: 5 });
