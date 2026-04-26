@@ -558,26 +558,31 @@ export const buchhalterOutreach = schedules.task({
         continue;
       }
 
-      let firmaEmail: string | null = null;
-      let firmaKontaktformularUrl: string | null = null;
+      let sucheErgebnis: { email: string | null; kontaktformularUrl: string | null };
       try {
-        const emailResult = await findeEmailAufWebsite(website);
-        firmaEmail = emailResult.email;
-        firmaKontaktformularUrl = emailResult.kontaktformularUrl;
+        sucheErgebnis = await findeEmailAufWebsite(website);
       } catch (err) {
-        console.error(`E-Mail-Suche Fehler für ${firma.name}:`, err);
+        console.error(`E-Mail/Formular-Suche Fehler für ${firma.name}:`, err);
         continue;
       }
 
-      if (!firmaEmail && !firmaKontaktformularUrl) {
+      const { email: firmaEmail, kontaktformularUrl } = sucheErgebnis;
+      const viaKontaktformular = !firmaEmail && !!kontaktformularUrl;
+
+      if (!firmaEmail && !kontaktformularUrl) {
         skipKeineEmail++;
-        console.log(`Keine E-Mail und kein Kontaktformular gefunden – überspringe: ${firma.name} (${website})`);
+        console.log(`Keine E-Mail und kein Kontaktformular – überspringe: ${firma.name} (${website})`);
         continue;
+      }
+
+      if (firmaEmail) {
+        console.log(`E-Mail gefunden: ${firmaEmail} für ${firma.name}`);
+      } else {
+        console.log(`Kontaktformular gefunden: ${kontaktformularUrl} für ${firma.name}`);
       }
 
       // Schritt 3: E-Mail-Inhalt generieren
       const betreff = `Neue Mandanten für ${firma.name} – ohne eigenen Aufwand`;
-      const viaKontaktformular = !firmaEmail && firmaKontaktformularUrl !== null;
       let emailInhalt: string;
       try {
         emailInhalt = await generiereEmail(firma.name, zielstadt, viaKontaktformular);
@@ -586,37 +591,30 @@ export const buchhalterOutreach = schedules.task({
         continue;
       }
 
-      // Schritt 4: E-Mail senden oder Kontaktformular ausfüllen
-      let kontaktErfolgreich = false;
-      if (firmaEmail) {
-        console.log(`E-Mail gefunden: ${firmaEmail} für ${firma.name}`);
-        try {
-          const gesendet = await sendeEmail(firma.name, betreff, emailInhalt, firmaEmail);
+      // Schritt 4: Senden (E-Mail oder Kontaktformular)
+      let gesendet = false;
+      try {
+        if (viaKontaktformular) {
+          gesendet = await fuellKontaktformular(firma.name, kontaktformularUrl!, betreff, emailInhalt);
+          if (!gesendet) {
+            console.error(`Kontaktformular fehlgeschlagen für ${firma.name}`);
+            continue;
+          }
+          console.log(`Kontaktformular ausgefüllt: ${firma.name}`);
+        } else {
+          gesendet = await sendeEmail(firma.name, betreff, emailInhalt, firmaEmail!);
           if (!gesendet) {
             console.error(`Brevo Fehler für ${firma.name}: E-Mail nicht gesendet`);
             continue;
           }
           console.log(`E-Mail gesendet: ${firma.name}`);
-          kontaktErfolgreich = true;
-        } catch (err) {
-          console.error(`Brevo Fehler für ${firma.name}:`, err);
-          continue;
         }
-      } else if (firmaKontaktformularUrl) {
-        console.log(`Kein E-Mail – versuche Kontaktformular: ${firma.name}`);
-        try {
-          kontaktErfolgreich = await fuellKontaktformular(firma.name, firmaKontaktformularUrl, betreff, emailInhalt);
-          if (!kontaktErfolgreich) {
-            console.log(`Kontaktformular fehlgeschlagen – überspringe: ${firma.name}`);
-            continue;
-          }
-        } catch (err) {
-          console.error(`Kontaktformular Fehler für ${firma.name}:`, err);
-          continue;
-        }
+      } catch (err) {
+        console.error(`Sende-Fehler für ${firma.name}:`, err);
+        continue;
       }
 
-      if (!kontaktErfolgreich) continue;
+      if (!gesendet) continue;
 
       // 5 Sekunden Pause zwischen Versand (Brevo Rate-Limit)
       await wait.for({ seconds: 5 });
