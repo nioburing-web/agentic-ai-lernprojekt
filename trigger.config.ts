@@ -22,7 +22,7 @@ export default defineConfig({
   dirs: ["./src/trigger"],
   build: {
     extensions: [
-      playwright({ browsers: ["chromium"] }),
+      playwright({ browsers: ["chromium"], version: "1.47.0" }),
     ],
   },
 });

@@ -2,10 +2,16 @@
 Lokales Test-Tool: Kontaktformular ausfüllen (WAT-Pattern)
 Verwendung: python tools/fill_contact_form.py --url "https://..." --firma "Mustermann GmbH"
 Output: JSON { "success": true/false, "grund": "..." }
+
+Flags:
+  --dry-run  Kein Browser – nur Env-Variablen und Import prüfen
+  --test     Browser öffnet headed, Formular wird ausgefüllt aber NICHT abgesendet,
+             Screenshot wird gespeichert unter screenshots/test_[firma].png
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 
@@ -13,7 +19,8 @@ def main():
     parser = argparse.ArgumentParser(description="Kontaktformular ausfüllen")
     parser.add_argument("--url", required=True, help="URL des Kontaktformulars")
     parser.add_argument("--firma", required=True, help="Firmenname")
-    parser.add_argument("--dry-run", action="store_true", help="Formular nicht absenden")
+    parser.add_argument("--dry-run", action="store_true", help="Nur Umgebung prüfen, kein Browser")
+    parser.add_argument("--test", action="store_true", help="Formular ausfüllen aber nicht absenden + Screenshot")
     args = parser.parse_args()
 
     absender_name = os.environ.get("ABSENDER_NAME", "NIO Automation")
@@ -22,6 +29,15 @@ def main():
     if not absender_email:
         print(json.dumps({"success": False, "grund": "ABSENDER_EMAIL fehlt in .env"}))
         sys.exit(1)
+
+    if args.dry_run:
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: F401
+            print(json.dumps({"success": True, "grund": "dry-run – Playwright verfügbar, kein Browser geöffnet"}))
+        except ImportError:
+            print(json.dumps({"success": False, "grund": "playwright nicht installiert – pip install playwright && playwright install chromium"}))
+            sys.exit(1)
+        return
 
     try:
         from playwright.sync_api import sync_playwright
@@ -40,8 +56,10 @@ def main():
         "Mit freundlichen Grüßen\nNIO Automation"
     )
 
+    headless = not args.test
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=headless)
         try:
             page = browser.new_page()
             page.goto(args.url, timeout=30000, wait_until="domcontentloaded")
@@ -74,8 +92,15 @@ def main():
                 return
             page.locator(textarea_sel).first.fill(nachricht)
 
-            if args.dry_run:
-                print(json.dumps({"success": True, "grund": "dry-run – nicht abgesendet"}))
+            if args.test:
+                os.makedirs("screenshots", exist_ok=True)
+                safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", args.firma)
+                screenshot_path = f"screenshots/test_{safe_name}.png"
+                page.screenshot(path=screenshot_path, full_page=False)
+                print(json.dumps({
+                    "success": True,
+                    "grund": f"TEST MODUS – Formular ausgefüllt aber nicht abgesendet. Screenshot: {screenshot_path}"
+                }))
                 return
 
             submit_sel = "button[type='submit'], input[type='submit']"

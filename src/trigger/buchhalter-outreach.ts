@@ -322,6 +322,17 @@ async function fuellKontaktformular(
       return false;
     }
 
+    // TEST_MODUS: Formular ausgefüllt aber nicht abgesendet + Screenshot
+    if (process.env.TEST_MODUS === "True") {
+      const { mkdirSync } = await import("fs");
+      mkdirSync("screenshots", { recursive: true });
+      const safeName = firma.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const screenshotPath = `screenshots/test_${safeName}.png`;
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+      console.log(`TEST MODUS – Formular ausgefüllt aber nicht abgesendet. Screenshot: ${screenshotPath}`);
+      return true;
+    }
+
     const urlVorSubmit = page.url();
     await submitButton.click();
 
