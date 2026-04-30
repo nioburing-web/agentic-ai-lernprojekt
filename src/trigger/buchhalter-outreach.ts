@@ -163,12 +163,38 @@ async function holeWebsiteVonPlaceDetails(placeId: string): Promise<string | nul
   }
 }
 
+function extrahiereEmails(html: string): string[] {
+  // 1. mailto: Links direkt parsen (zuverlässigste Quelle)
+  const mailtoEmails = [...html.matchAll(/href=["']mailto:([^"'?\s]+)/gi)]
+    .map((m) => m[1].toLowerCase().replace(/[.,;)]+$/, ""))
+    .filter((e) => e.includes("@"));
+
+  // 2. Alle E-Mail-Adressen im Text
+  const textEmails = [...html.matchAll(EMAIL_REGEX)]
+    .map((m) => m[0].toLowerCase().replace(/[.,;)]+$/, ""));
+
+  return [...new Set([...mailtoEmails, ...textEmails])];
+}
+
+function findeImpressumLink(html: string, baseUrl: string): string | null {
+  // Impressum-Link dynamisch aus der Seite extrahieren
+  const matches = [...html.matchAll(/href=["']([^"']+)["'][^>]*>[^<]*impressum[^<]*/gi)];
+  for (const m of matches) {
+    const href = m[1];
+    if (!href || href.startsWith("#") || href.startsWith("javascript")) continue;
+    if (href.startsWith("http")) return href;
+    if (href.startsWith("/")) return baseUrl + href;
+    return `${baseUrl}/${href}`;
+  }
+  return null;
+}
+
 export async function findeEmailAufWebsite(
   websiteUrl: string
 ): Promise<{ email: string | null; kontaktformularUrl: string | null }> {
   let baseUrl = websiteUrl;
   if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-    baseUrl = "https://" + baseUrl;
+    baseUrl = "https://" + websiteUrl;
   }
   baseUrl = baseUrl.replace(/\/$/, "");
 
@@ -180,40 +206,65 @@ export async function findeEmailAufWebsite(
     return { email: null, kontaktformularUrl: null };
   }
 
+  const fetchSeite = async (url: string): Promise<string | null> => {
+    try {
+      const res = await fetchMitTimeout(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Language": "de-DE,de;q=0.9",
+        },
+      }, 6000);
+      if (!res.ok) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
+  };
+
+  const pruefEmail = (email: string, nurDomain = false): boolean => {
+    if (!email.includes("@")) return false;
+    const prefix = email.split("@")[0];
+    if (IGNORIERTE_PREFIXES.has(prefix)) return false;
+    if (nurDomain && !email.includes(`@${domain}`) && !email.includes(`@www.${domain}`)) return false;
+    return true;
+  };
+
+  // Schritt 1: Startseite laden – Impressum-Link suchen + erste Emails
+  const startseite = await fetchSeite(baseUrl);
+  let impressumUrl = `${baseUrl}/impressum`;
+  if (startseite) {
+    const dynamisch = findeImpressumLink(startseite, baseUrl);
+    if (dynamisch) impressumUrl = dynamisch;
+  }
+
+  // Schritt 2: Alle Kandidatenseiten prüfen (domain-gefiltert)
   const kandidatenseiten = [
     baseUrl,
     `${baseUrl}/kontakt`,
-    `${baseUrl}/impressum`,
     `${baseUrl}/contact`,
+    `${baseUrl}/ueber-uns`,
+    `${baseUrl}/team`,
   ];
 
   const alleEmails: string[] = [];
 
   for (const seite of kandidatenseiten) {
-    let inhalt: string;
-    try {
-      const res = await fetchMitTimeout(
-        seite,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "de-DE,de;q=0.9",
-          },
-        },
-        5000
-      );
-      if (!res.ok) continue;
-      inhalt = await res.text();
-    } catch {
-      continue;
+    const inhalt = seite === baseUrl ? startseite : await fetchSeite(seite);
+    if (!inhalt) continue;
+
+    for (const email of extrahiereEmails(inhalt)) {
+      if (!pruefEmail(email, true)) continue; // nur domain-Emails auf normalen Seiten
+      const prefix = email.split("@")[0];
+      if (BEVORZUGTE_PREFIXES.has(prefix)) return { email, kontaktformularUrl: null };
+      alleEmails.push(email);
     }
+  }
 
-    const gefunden = [...inhalt.matchAll(EMAIL_REGEX)]
-      .map((m) => m[0].toLowerCase().replace(/[.,;)]+$/, ""))
-      .filter((email) => email.includes(`@${domain}`) || email.includes(`@www.${domain}`));
-
-    for (const email of gefunden) {
+  // Schritt 3: Impressum – hier auch fremde Domains akzeptieren (z.B. gmail.com)
+  const impressumInhalt = await fetchSeite(impressumUrl);
+  if (impressumInhalt) {
+    for (const email of extrahiereEmails(impressumInhalt)) {
+      if (!pruefEmail(email, false)) continue; // kein Domain-Filter auf Impressum
       const prefix = email.split("@")[0];
       if (BEVORZUGTE_PREFIXES.has(prefix)) return { email, kontaktformularUrl: null };
       alleEmails.push(email);
@@ -221,8 +272,7 @@ export async function findeEmailAufWebsite(
   }
 
   for (const email of [...new Set(alleEmails)]) {
-    const prefix = email.split("@")[0];
-    if (!IGNORIERTE_PREFIXES.has(prefix)) return { email, kontaktformularUrl: null };
+    if (pruefEmail(email, false)) return { email, kontaktformularUrl: null };
   }
 
   // Kontaktformular suchen wenn keine E-Mail gefunden
@@ -273,9 +323,9 @@ async function fuellKontaktformular(
   console.log(`Fülle Kontaktformular aus für: ${firma} → ${kontaktformularUrl}`);
 
   const absenderName = process.env.ABSENDER_NAME ?? "NIO Automation";
-  const absenderEmail = process.env.ABSENDER_EMAIL;
+  const absenderEmail = process.env.REPLY_TO_EMAIL ?? process.env.ABSENDER_EMAIL;
   if (!absenderEmail) {
-    console.error("ABSENDER_EMAIL fehlt – Kontaktformular übersprungen");
+    console.error("REPLY_TO_EMAIL und ABSENDER_EMAIL fehlen – Kontaktformular übersprungen");
     return false;
   }
 
@@ -286,6 +336,22 @@ async function fuellKontaktformular(
     const page = await browser.newPage();
     await page.goto(kontaktformularUrl, { timeout: 30000, waitUntil: "domcontentloaded" });
 
+    // Cookie-Consent-Modal schließen (blockiert sonst Klicks)
+    const cookieSelectors = [
+      "button[id*='accept' i]", "button[class*='accept' i]", "button[class*='agree' i]",
+      "button[class*='zustimm' i]", "button[class*='akzept' i]",
+      ".ccm-widget .ccm--btn-accept", ".ccm-modal button", "[class*='cookie'] button",
+      "button:has-text('Akzeptieren')", "button:has-text('Alle akzeptieren')",
+      "button:has-text('Zustimmen')", "button:has-text('Accept')",
+    ];
+    for (const sel of cookieSelectors) {
+      const btn = page.locator(sel).first();
+      if (await btn.count() > 0) {
+        try { await btn.click({ timeout: 2000 }); } catch {}
+        break;
+      }
+    }
+
     // CAPTCHA-Erkennung
     const hatCaptcha = await page.locator(".g-recaptcha, [class*='captcha'], iframe[src*='recaptcha']").count();
     if (hatCaptcha > 0) {
@@ -294,10 +360,10 @@ async function fuellKontaktformular(
     }
 
     // Felder ausfüllen
-    const nameSelector = "input[name*='name' i], input[placeholder*='Name' i], input[id*='name' i]";
-    const emailSelector = "input[type='email'], input[name*='email' i], input[name*='mail' i]";
-    const betreffSelector = "input[name*='subject' i], input[name*='betreff' i], input[placeholder*='Betreff' i]";
-    const nachrichtSelector = "textarea, input[name*='message' i], input[name*='nachricht' i]";
+    const nameSelector = "input[name*='name' i]:not([type='hidden']), input[placeholder*='Name' i]:not([type='hidden']), input[id*='name' i]:not([type='hidden'])";
+    const emailSelector = "input[type='email'], input[name*='email' i]:not([type='hidden']), input[name*='mail' i]:not([type='hidden'])";
+    const betreffSelector = "input[name*='subject' i]:not([type='hidden']), input[name*='betreff' i]:not([type='hidden']), input[placeholder*='Betreff' i]:not([type='hidden'])";
+    const nachrichtSelector = "textarea, input[name*='message' i]:not([type='hidden']), input[name*='nachricht' i]:not([type='hidden'])";
     const submitSelector = "button[type='submit'], input[type='submit'], button:has-text('Senden'), button:has-text('Absenden')";
 
     const nameFeld = page.locator(nameSelector).first();
@@ -334,7 +400,12 @@ async function fuellKontaktformular(
     }
 
     const urlVorSubmit = page.url();
-    await submitButton.click();
+    // Erst normaler Klick, falls Overlay noch da: per JS erzwingen
+    try {
+      await submitButton.click({ timeout: 5000 });
+    } catch {
+      await submitButton.evaluate((el: HTMLElement) => el.click());
+    }
 
     // Erfolgsprüfung: URL-Wechsel oder Erfolgs-Text
     try {
@@ -422,8 +493,9 @@ async function sendeEmail(
   empfaengerEmail: string
 ): Promise<boolean> {
   const apiKey = process.env.BREVO_API_KEY;
+  const absenderName = process.env.ABSENDER_NAME ?? "NIO Automation";
   const absenderEmail = process.env.ABSENDER_EMAIL;
-  const replyToEmail = process.env.REPLY_EMAIL;
+  const replyToEmail = process.env.REPLY_TO_EMAIL;
   // TEST_EMAIL überschreibt Empfänger wenn gesetzt (Testmodus)
   const testEmail = process.env.TEST_EMAIL;
 
@@ -436,11 +508,11 @@ async function sendeEmail(
     console.log(`Testmodus aktiv – sende an ${testEmail} statt ${empfaengerEmail}`);
   }
 
-  const signatur = `\n\nMit freundlichen Grüßen\nNIO Automation\n${absenderEmail}`;
+  const signatur = `\n\nMit freundlichen Grüßen\n${absenderName}\n${absenderEmail}`;
   const vollstaendigerInhalt = inhalt + signatur;
 
   const payload = {
-    sender: { name: "NIO Automation", email: absenderEmail },
+    sender: { name: absenderName, email: absenderEmail },
     replyTo: { email: replyToEmail ?? absenderEmail },
     to: [{ email: empfaenger }],
     subject: betreff,
@@ -502,7 +574,9 @@ export const buchhalterOutreach = schedules.task({
   run: async () => {
     console.log("=== Buchhalter Outreach Agent gestartet ===");
 
-    const zielbranche = process.env.ZIELBRANCHE ?? "Steuerberater";
+    const SUCHBEGRIFFE = ["Buchhalter", "Steuerberater", "Buchhaltung", "Kanzlei"];
+    const zielbranche = process.env.ZIELBRANCHE
+      ?? SUCHBEGRIFFE[Math.floor(Math.random() * SUCHBEGRIFFE.length)]!;
     const zielstadt = process.env.ZIELSTADT ?? "Hamburg";
     const maxEmails = parseInt(process.env.MAX_EMAILS_PRO_TAG ?? "10", 10);
 
@@ -608,7 +682,7 @@ export const buchhalterOutreach = schedules.task({
         if (viaKontaktformular) {
           gesendet = await fuellKontaktformular(firma.name, kontaktformularUrl!, betreff, emailInhalt);
           if (!gesendet) {
-            console.error(`Kontaktformular fehlgeschlagen für ${firma.name}`);
+            console.log(`Kontaktformular übersprungen für ${firma.name} (CAPTCHA, kein Formular oder Overlay)`);
             continue;
           }
           console.log(`Kontaktformular ausgefüllt: ${firma.name}`);
