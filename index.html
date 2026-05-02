@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIO Automation – KI-Agenten für Ihren Vertrieb</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg:#080C14; --bg2:#0D1420; --bg3:#111827;
+      --accent:#6366F1; --accent2:#818CF8; --gold:#F59E0B;
+      --text:#F1F5F9; --muted:#94A3B8;
+      --border:rgba(99,102,241,0.18); --glow:rgba(99,102,241,0.12);
+    }
+    html { scroll-behavior: smooth; }
+    body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; overflow-x:hidden; }
+
+    /* NAV */
+    nav { position:fixed; top:0; left:0; right:0; z-index:100; padding:20px 5%; display:flex; align-items:center; justify-content:space-between; background:rgba(8,12,20,0.85); backdrop-filter:blur(20px); border-bottom:1px solid var(--border); }
+    .nav-logo { font-family:'Syne',sans-serif; font-weight:800; font-size:1.2rem; letter-spacing:-0.02em; color:var(--text); text-decoration:none; }
+    .nav-logo span { color:var(--accent2); }
+    .nav-cta { background:var(--accent); color:white; font-weight:500; font-size:0.9rem; padding:9px 22px; border-radius:6px; text-decoration:none; transition:opacity 0.2s; }
+    .nav-cta:hover { opacity:0.85; }
+
+    /* HERO */
+    .hero { min-height:100vh; display:flex; align-items:center; justify-content:center; text-align:center; padding:120px 5% 80px; position:relative; }
+    .hero-glow { position:absolute; top:40%; left:50%; transform:translate(-50%,-50%); width:800px; height:600px; background:radial-gradient(ellipse,rgba(99,102,241,0.15) 0%,transparent 70%); pointer-events:none; }
+    .hero-badge { display:inline-flex; align-items:center; gap:8px; background:rgba(99,102,241,0.1); border:1px solid var(--border); border-radius:999px; padding:7px 18px; font-size:0.82rem; color:var(--accent2); font-weight:500; margin-bottom:32px; letter-spacing:0.03em; }
+    .hero-badge::before { content:''; width:6px; height:6px; background:var(--accent2); border-radius:50%; animation:pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .hero h1 { font-family:'Syne',sans-serif; font-size:clamp(2.8rem,7vw,5.5rem); font-weight:800; line-height:1.05; letter-spacing:-0.03em; margin-bottom:24px; }
+    .hero h1 em { font-style:normal; background:linear-gradient(135deg,var(--accent2),var(--gold)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .hero p { font-size:1.15rem; color:var(--muted); max-width:520px; margin:0 auto 44px; font-weight:300; line-height:1.7; }
+    .hero-actions { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+    .btn-primary { background:var(--accent); color:white; font-weight:500; padding:14px 32px; border-radius:8px; text-decoration:none; font-size:0.95rem; transition:transform 0.2s,box-shadow 0.2s; box-shadow:0 0 30px rgba(99,102,241,0.3); }
+    .btn-primary:hover { transform:translateY(-2px); box-shadow:0 0 40px rgba(99,102,241,0.45); }
+    .btn-secondary { background:transparent; color:var(--muted); font-weight:400; padding:14px 32px; border-radius:8px; text-decoration:none; font-size:0.95rem; border:1px solid rgba(148,163,184,0.2); transition:border-color 0.2s,color 0.2s; }
+    .btn-secondary:hover { border-color:var(--accent2); color:var(--text); }
+
+    /* STATS */
+    .stats-wrap { padding:0 5% 100px; }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1px; max-width:760px; margin:0 auto; border:1px solid var(--border); border-radius:16px; overflow:hidden; }
+    .stat { background:var(--bg2); padding:28px 20px; text-align:center; }
+    .stat-num { font-family:'Syne',sans-serif; font-size:2.2rem; font-weight:800; color:var(--accent2); line-height:1; margin-bottom:6px; }
+    .stat-label { font-size:0.82rem; color:var(--muted); }
+
+    /* SECTION */
+    section { padding:100px 5%; position:relative; }
+    .section-inner { max-width:1100px; margin:0 auto; }
+    .section-tag { font-size:0.75rem; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:var(--accent2); margin-bottom:14px; }
+    .section-title { font-family:'Syne',sans-serif; font-size:clamp(1.8rem,4vw,2.8rem); font-weight:800; letter-spacing:-0.02em; line-height:1.15; margin-bottom:16px; }
+    .section-sub { font-size:1.05rem; color:var(--muted); max-width:540px; line-height:1.7; font-weight:300; margin-bottom:52px; }
+
+    /* STEPS */
+    .steps-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:1px; background:var(--border); border-radius:16px; overflow:hidden; }
+    .step-item { background:var(--bg2); padding:36px 28px; transition:background 0.3s; }
+    .step-item:hover { background:var(--bg3); }
+    .step-num { font-family:'Syne',sans-serif; font-size:3rem; font-weight:800; color:rgba(99,102,241,0.12); line-height:1; margin-bottom:20px; }
+    .step-icon { font-size:1.5rem; margin-bottom:12px; }
+    .step-title { font-family:'Syne',sans-serif; font-weight:700; font-size:0.98rem; margin-bottom:8px; }
+    .step-desc { font-size:0.88rem; color:var(--muted); line-height:1.6; }
+
+    /* FEATURES */
+    .features-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:20px; }
+    .feature-card { background:var(--bg2); border:1px solid var(--border); border-radius:16px; padding:32px; transition:border-color 0.3s,transform 0.3s; }
+    .feature-card:hover { border-color:var(--accent); transform:translateY(-4px); }
+    .feature-icon { width:46px; height:46px; background:var(--glow); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:1.3rem; margin-bottom:18px; }
+    .feature-title { font-family:'Syne',sans-serif; font-weight:700; font-size:1rem; margin-bottom:10px; }
+    .feature-desc { font-size:0.9rem; color:var(--muted); line-height:1.65; }
+
+    /* PRICING */
+    .pricing-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:24px; max-width:700px; margin:0 auto; }
+    .pricing-card { background:var(--bg2); border:1px solid var(--border); border-radius:20px; padding:40px 32px; position:relative; transition:transform 0.3s; }
+    .pricing-card:hover { transform:translateY(-6px); }
+    .pricing-card.featured { border-color:var(--accent); background:linear-gradient(135deg,rgba(99,102,241,0.08),var(--bg2)); }
+    .featured-badge { position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:var(--accent); color:white; font-size:0.72rem; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; padding:5px 16px; border-radius:999px; white-space:nowrap; }
+    .pricing-name { font-family:'Syne',sans-serif; font-weight:700; font-size:1.1rem; margin-bottom:8px; }
+    .pricing-price { font-family:'Syne',sans-serif; font-size:3rem; font-weight:800; line-height:1; margin-bottom:4px; letter-spacing:-0.03em; }
+    .pricing-price span { font-size:1rem; font-weight:400; color:var(--muted); }
+    .pricing-setup { font-size:0.85rem; color:var(--muted); margin-bottom:28px; }
+    .pricing-divider { height:1px; background:var(--border); margin-bottom:24px; }
+    .pricing-feature { display:flex; align-items:flex-start; gap:10px; font-size:0.88rem; color:var(--muted); margin-bottom:10px; line-height:1.5; }
+    .pricing-feature::before { content:'✓'; color:var(--accent2); font-weight:600; flex-shrink:0; }
+    .pricing-btn { display:block; text-align:center; margin-top:28px; padding:13px; border-radius:8px; font-weight:500; font-size:0.93rem; text-decoration:none; transition:opacity 0.2s,transform 0.2s; }
+    .pricing-btn:hover { opacity:0.85; transform:translateY(-1px); }
+    .pricing-btn.primary { background:var(--accent); color:white; }
+    .pricing-btn.outline { background:transparent; color:var(--muted); border:1px solid var(--border); }
+    .pricing-btn.outline:hover { color:var(--text); border-color:var(--accent2); }
+
+    /* CTA */
+    .cta-section { background:var(--bg2); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+    .cta-inner { max-width:620px; margin:0 auto; text-align:center; }
+    .cta-inner p { color:var(--muted); font-size:1.05rem; margin-bottom:36px; font-weight:300; }
+    .cta-link { display:inline-flex; align-items:center; gap:12px; background:var(--accent); color:white; font-weight:500; padding:16px 36px; border-radius:8px; text-decoration:none; font-size:1rem; transition:transform 0.2s,box-shadow 0.2s; box-shadow:0 0 40px rgba(99,102,241,0.3); }
+    .cta-link:hover { transform:translateY(-3px); box-shadow:0 0 60px rgba(99,102,241,0.45); }
+
+    /* FOOTER */
+    footer { padding:36px 5%; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; border-top:1px solid var(--border); }
+    .footer-logo { font-family:'Syne',sans-serif; font-weight:700; font-size:1rem; color:var(--muted); }
+    .footer-logo span { color:var(--accent2); }
+    footer p { font-size:0.85rem; color:var(--muted); }
+    footer a { color:var(--accent2); text-decoration:none; }
+
+    @keyframes fadeUp { from{opacity:0;transform:translateY(28px)} to{opacity:1;transform:translateY(0)} }
+    .hero-content > * { animation:fadeUp 0.7s ease both; }
+    .hero-content > *:nth-child(1){animation-delay:0.1s}
+    .hero-content > *:nth-child(2){animation-delay:0.2s}
+    .hero-content > *:nth-child(3){animation-delay:0.3s}
+    .hero-content > *:nth-child(4){animation-delay:0.4s}
+
+    /* CONTACT FORM */
+    .form-wrap { max-width:520px; margin:0 auto; text-align:left; }
+    .form-row { margin-bottom:14px; }
+    .form-row input,.form-row textarea { width:100%; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:8px; padding:14px 18px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:0.95rem; outline:none; transition:border-color 0.2s; }
+    .form-row input::placeholder,.form-row textarea::placeholder { color:var(--muted); }
+    .form-row input:focus,.form-row textarea:focus { border-color:var(--accent); }
+    .form-row textarea { resize:vertical; min-height:120px; }
+    .form-submit { width:100%; background:var(--accent); color:white; border:none; padding:15px; border-radius:8px; font-size:1rem; font-weight:500; cursor:pointer; font-family:'DM Sans',sans-serif; box-shadow:0 0 30px rgba(99,102,241,0.3); transition:opacity 0.2s,transform 0.2s; }
+    .form-submit:hover { opacity:0.85; transform:translateY(-1px); }
+    .form-submit:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+    .form-success { background:rgba(99,102,241,0.1); border:1px solid var(--accent); border-radius:12px; padding:28px; text-align:center; color:var(--accent2); font-size:1.05rem; display:none; }
+    .form-error { color:#f87171; font-size:0.85rem; margin-top:10px; text-align:center; display:none; }
+
+    @media(max-width:600px){
+      .hero h1{font-size:2.4rem}
+      section{padding:72px 5%}
+      footer{flex-direction:column;text-align:center}
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="#" class="nav-logo">NIO<span>.</span>Automation</a>
+  <a href="#kontakt" class="nav-cta">Jetzt anfragen</a>
+</nav>
+
+<div class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-content" style="position:relative;z-index:1">
+    <div class="hero-badge">KI-Automatisierung · Aktiv seit 2025</div>
+    <h1>Ihr Vertrieb.<br><em>Vollautomatisch.</em></h1>
+    <p>KI-Agenten die täglich neue Kontakte recherchieren, personalisierte E-Mails senden und Antworten verarbeiten – ohne Ihren Eingriff.</p>
+    <div class="hero-actions">
+      <a href="#kontakt" class="btn-primary">Kostenlose Demo anfragen</a>
+      <a href="#wie-es-funktioniert" class="btn-secondary">Wie es funktioniert →</a>
+    </div>
+  </div>
+</div>
+
+<div class="stats-wrap">
+  <div class="stats">
+    <div class="stat"><div class="stat-num">10+</div><div class="stat-label">Kontakte täglich</div></div>
+    <div class="stat"><div class="stat-num">100%</div><div class="stat-label">Automatisiert</div></div>
+    <div class="stat"><div class="stat-num">24/7</div><div class="stat-label">Agent läuft täglich</div></div>
+    <div class="stat"><div class="stat-num">0</div><div class="stat-label">Manueller Aufwand</div></div>
+  </div>
+</div>
+
+<section id="wie-es-funktioniert" style="background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-tag">Ablauf</div>
+    <h2 class="section-title">Von der Suche zur Antwort –<br>vollautomatisch</h2>
+    <p class="section-sub">Einmal einrichten, täglich profitieren. Der Agent arbeitet im Hintergrund während Sie sich auf Ihr Kerngeschäft konzentrieren.</p>
+    <div class="steps-grid">
+      <div class="step-item"><div class="step-num">01</div><div class="step-icon">🗺️</div><div class="step-title">Recherche</div><div class="step-desc">Täglich neue Kontakte via Google Maps in Ihren Zielregionen.</div></div>
+      <div class="step-item"><div class="step-num">02</div><div class="step-icon">✍️</div><div class="step-title">Personalisierung</div><div class="step-desc">KI schreibt individuelle E-Mails – zugeschnitten auf jeden Empfänger.</div></div>
+      <div class="step-item"><div class="step-num">03</div><div class="step-icon">📨</div><div class="step-title">Versand</div><div class="step-desc">Automatischer Versand mit Anti-Spam-Schutz und Domain-Warming.</div></div>
+      <div class="step-item"><div class="step-num">04</div><div class="step-icon">🤖</div><div class="step-title">Klassifizierung</div><div class="step-desc">Antworten werden automatisch erkannt und kategorisiert.</div></div>
+      <div class="step-item"><div class="step-num">05</div><div class="step-icon">📊</div><div class="step-title">Dashboard</div><div class="step-desc">Alles live in Ihrem persönlichen Dashboard – transparent und nachvollziehbar.</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-inner">
+    <div class="section-tag">Funktionen</div>
+    <h2 class="section-title">Alles was Sie brauchen</h2>
+    <p class="section-sub">Kein manuelles Suchen. Kein Copy-Paste. Kein Nachverfolgen. Der Agent übernimmt die Vertriebsarbeit.</p>
+    <div class="features-grid">
+      <div class="feature-card"><div class="feature-icon">🗺️</div><div class="feature-title">Google Maps Integration</div><div class="feature-desc">Automatische Suche in Ihren Zielregionen – täglich aktualisiert und bereinigt.</div></div>
+      <div class="feature-card"><div class="feature-icon">🧠</div><div class="feature-title">KI-Textgenerierung</div><div class="feature-desc">GPT-4 schreibt personalisierte Anfragen – kein generischer Massenversand.</div></div>
+      <div class="feature-card"><div class="feature-icon">📋</div><div class="feature-title">Live-Dashboard</div><div class="feature-desc">Google Sheets mit allen Kontakten, Antworten und Terminen – immer aktuell.</div></div>
+      <div class="feature-card"><div class="feature-icon">⚡</div><div class="feature-title">Sofort-Benachrichtigung</div><div class="feature-desc">Bei positivem Feedback erhalten Sie sofort eine E-Mail – keine Antwort geht verloren.</div></div>
+      <div class="feature-card"><div class="feature-icon">🎛️</div><div class="feature-title">Eigenes Steuerungs-Panel</div><div class="feature-desc">Budget, Regionen und Kriterien einfach anpassen – ohne Programmierkenntnisse.</div></div>
+      <div class="feature-card"><div class="feature-icon">🛡️</div><div class="feature-title">Duplikat-Schutz</div><div class="feature-desc">Kein Kontakt wird zweimal angeschrieben – mit Datum und Status gespeichert.</div></div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="section-inner" style="text-align:center">
+    <div class="section-tag">Preise</div>
+    <h2 class="section-title">Transparent. Fair. Effektiv.</h2>
+    <p class="section-sub" style="margin:0 auto 52px">Starten Sie mit einer kostenlosen Demo – keine Verpflichtung.</p>
+    <div class="pricing-grid">
+      <div class="pricing-card">
+        <div class="pricing-name">Basic</div>
+        <div class="pricing-price">149€ <span>/ Monat</span></div>
+        <div class="pricing-setup">+ einmalig 299 € Setup</div>
+        <div class="pricing-divider"></div>
+        <div class="pricing-feature">Bis zu 10 Kontakte täglich</div>
+        <div class="pricing-feature">Automatische Recherche</div>
+        <div class="pricing-feature">Personalisierte E-Mails</div>
+        <div class="pricing-feature">Google Sheet Dashboard</div>
+        <div class="pricing-feature">Benachrichtigung bei Interesse</div>
+        <a href="#kontakt" class="pricing-btn outline">Jetzt anfragen</a>
+      </div>
+      <div class="pricing-card featured">
+        <div class="featured-badge">Empfohlen</div>
+        <div class="pricing-name">Pro</div>
+        <div class="pricing-price">299€ <span>/ Monat</span></div>
+        <div class="pricing-setup">+ einmalig 499 € Setup</div>
+        <div class="pricing-divider"></div>
+        <div class="pricing-feature">Bis zu 20 Kontakte täglich</div>
+        <div class="pricing-feature">Alles aus Basic</div>
+        <div class="pricing-feature">Eigenes Steuerungs-Dashboard</div>
+        <div class="pricing-feature">Kriterien jederzeit anpassbar</div>
+        <div class="pricing-feature">Monatlicher Auswertungs-Bericht</div>
+        <div class="pricing-feature">Priorisierung nach Region & Budget</div>
+        <a href="#kontakt" class="pricing-btn primary">Jetzt anfragen</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta-section" id="kontakt">
+  <div class="cta-inner" style="max-width:560px">
+    <h2 class="section-title">Bereit für Ihren<br><em style="font-style:normal;background:linear-gradient(135deg,var(--accent2),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">eigenen KI-Agenten?</em></h2>
+    <p>Schreiben Sie uns – wir zeigen Ihnen in 15 Minuten was möglich ist. Kostenlos und unverbindlich.</p>
+    <div class="form-wrap">
+      <form id="kontaktform">
+        <div class="form-row"><input type="text" name="name" placeholder="Ihr Name" required></div>
+        <div class="form-row"><input type="email" name="email" placeholder="Ihre E-Mail-Adresse" required></div>
+        <div class="form-row"><textarea name="message" placeholder="Was interessiert Sie? Ihre Branche, Ihr Ziel ..." required></textarea></div>
+        <div class="form-row"><button type="submit" class="form-submit">Anfrage senden →</button></div>
+      </form>
+      <div class="form-error" id="form-error">Etwas ist schiefgelaufen – bitte versuchen Sie es erneut.</div>
+      <div class="form-success" id="form-success">✓ &nbsp;Vielen Dank! Wir melden uns gleich.</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-logo">NIO<span>.</span>Automation</div>
+  <p>© 2026 NIO Automation · <a href="mailto:anfragen@nio-automation.de">anfragen@nio-automation.de</a> · nio-automation.de</p>
+</footer>
+
+<script>
+document.getElementById('kontaktform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const btn = form.querySelector('button[type="submit"]');
+  const errorEl = document.getElementById('form-error');
+  const successEl = document.getElementById('form-success');
+
+  btn.disabled = true;
+  btn.textContent = 'Wird gesendet ...';
+  errorEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/.netlify/functions/kontakt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: form.name.value,
+        email: form.email.value,
+        message: form.message.value,
+        company: ''
+      })
+    });
+
+    if (res.ok) {
+      form.style.display = 'none';
+      successEl.style.display = 'block';
+    } else {
+      throw new Error('Server error');
+    }
+  } catch {
+    errorEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Anfrage senden →';
+  }
+});
+</script>
+</body>
+</html>
