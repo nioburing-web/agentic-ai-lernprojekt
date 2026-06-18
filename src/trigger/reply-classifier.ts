@@ -702,6 +702,21 @@ export const replyClassifier = schedules.task({
       return;
     }
 
+    // Schritt 2b: Korrekturen wegsichern + Few-Shot bauen
+    let geharvtet = 0;
+    let fewShot = "";
+    let aktiveBeispiele = 0;
+    try {
+      await stelleLernbeispieleTabSicher(sheets, sheetId);
+      geharvtet = await harvesteKorrekturen(sheets, sheetId, queueRows);
+      const alle = await ladeLernbeispiele(sheets, sheetId);
+      aktiveBeispiele = Math.min(alle.length, 12);
+      fewShot = formatiereLernbeispiele(waehleLernbeispiele(alle, 12));
+      logger.log(`Lernschleife: ${geharvtet} neu gelernt, ${alle.length} Beispiele gesamt`);
+    } catch (err) {
+      logger.error("Lernschleife-Fehler (Agent läuft ohne Few-Shot weiter):", { error: String(err) });
+    }
+
     // Schritt 3: IMAP-Client für Draft + \Seen
     const imapClient = neuerImapClient();
     let imapVerbunden = false;
@@ -733,7 +748,7 @@ export const replyClassifier = schedules.task({
         }
 
         // Schritt 4: Entscheidung treffen
-        const e = await entscheideEmail(email);
+        const e = await entscheideEmail(email, fewShot);
         const aktion = entscheideAktion(e);
         logger.log(
           `[${e.kategorie} ${e.confidence}%] → ${aktion} | ${lead.name} <${senderEmail}> | ${e.grund}`
@@ -769,6 +784,15 @@ export const replyClassifier = schedules.task({
           report.push(`FEHLER → ${lead.name}: ${String(err).slice(0, 80)}`);
         }
 
+        // Agent-Entscheidung für spätere Korrektur festhalten (K/L/M)
+        try {
+          await schreibeAgentEntscheidung(
+            sheets, sheetId, lead.rowNumber, email.body.slice(0, 500), e.kategorie, e.antwort
+          );
+        } catch (err) {
+          logger.error(`Agent-Entscheidung schreiben fehlgeschlagen für ${senderEmail}:`, { error: String(err) });
+        }
+
         // Schritt 6: als gelesen markieren (nur bekannte Leads)
         if (imapVerbunden) await markiereAlsGelesen(email.uid, imapClient);
       }
@@ -788,6 +812,8 @@ export const replyClassifier = schedules.task({
       `  Entwürfe zur Freigabe:  ${entwuerfe}`,
       `  Nur Status (Absage/Abw): ${nurStatus}`,
       `  Übersprungen (kein Lead): ${unbekannt}`,
+      `  Neu gelernte Korrekturen:  ${geharvtet}`,
+      `  Aktive Lernbeispiele:      ${aktiveBeispiele}`,
       ``,
     ];
     try {
