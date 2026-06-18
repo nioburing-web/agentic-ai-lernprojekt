@@ -14,6 +14,8 @@ const CONFIDENCE_SCHWELLE = 90;
 
 const CALENDLY_LINK = process.env.CALENDLY_LINK ?? "https://calendly.com/nioburing/30min";
 
+const LERN_TAB = "Lernbeispiele";
+
 // ─── Entscheidungs-Prompt (statt reiner Klassifizierung) ────────────────────────
 const ENTSCHEIDUNGS_SKILL = `Du bist der Reply-Agent für NIO Automation (maßgeschneiderte KI-Agenten).
 Du liest die Antwort eines Leads auf eine Kaltakquise-Mail und entscheidest die nächste Aktion.
@@ -338,7 +340,7 @@ export async function ladeOutreachQueue(): Promise<{
   if (!sheetId) throw new Error("GOOGLE_SHEET_ID fehlt");
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Outreach Queue!A:J",
+    range: "Outreach Queue!A:P",
   });
   return { sheets, sheetId, rows: (res.data.values ?? []) as string[][] };
 }
@@ -531,6 +533,114 @@ async function setzeStatus(
         { range: `Outreach Queue!J${rowNumber}`, values: [[notiz]] },
       ],
     },
+  });
+}
+
+// Legt den Lernbeispiele-Tab an, falls er fehlt. Existiert er schon → still ok.
+async function stelleLernbeispieleTabSicher(
+  sheets: ReturnType<typeof googleSheets>,
+  sheetId: string
+): Promise<void> {
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title: LERN_TAB } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `${LERN_TAB}!A1:G1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["Datum", "LeadEmail", "EmailAuszug", "AgentKategorie", "RichtigKategorie", "AgentAntwort", "DeineAntwort"]],
+      },
+    });
+    logger.log(`Tab "${LERN_TAB}" angelegt`);
+  } catch (err) {
+    logger.log(`Tab "${LERN_TAB}" existiert bereits (ok): ${String(err).slice(0, 80)}`);
+  }
+}
+
+// Liest alle Lernbeispiele (chronologisch, ältestes oben).
+export async function ladeLernbeispiele(
+  sheets: ReturnType<typeof googleSheets>,
+  sheetId: string
+): Promise<Lernbeispiel[]> {
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${LERN_TAB}!A2:G`,
+    });
+    const rows = (res.data.values ?? []) as string[][];
+    return rows
+      .filter((r) => r && ((r[4] ?? "").trim() || (r[6] ?? "").trim()))
+      .map((r) => ({
+        datum: (r[0] ?? "").trim(),
+        leadEmail: (r[1] ?? "").trim(),
+        emailAuszug: (r[2] ?? "").trim(),
+        agentKategorie: (r[3] ?? "").trim(),
+        richtigKategorie: (r[4] ?? "").trim(),
+        agentAntwort: (r[5] ?? "").trim(),
+        deineAntwort: (r[6] ?? "").trim(),
+      }));
+  } catch (err) {
+    logger.error("Lernbeispiele laden fehlgeschlagen:", { error: String(err) });
+    return [];
+  }
+}
+
+// Sichert korrigierte Queue-Zeilen in den Lernbeispiele-Tab und setzt P=GELERNT.
+export async function harvesteKorrekturen(
+  sheets: ReturnType<typeof googleSheets>,
+  sheetId: string,
+  rows: string[][]
+): Promise<number> {
+  const zuHarvesten = zuHarvestendeZeilen(rows);
+  if (zuHarvesten.length === 0) return 0;
+
+  const heute = new Date().toLocaleDateString("de-DE", {
+    timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric",
+  });
+  const werte = zuHarvesten.map(({ beispiel: b }) => [
+    b.datum || heute, b.leadEmail, b.emailAuszug, b.agentKategorie, b.richtigKategorie, b.agentAntwort, b.deineAntwort,
+  ]);
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range: `${LERN_TAB}!A:G`,
+    valueInputOption: "RAW",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: werte },
+  });
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      valueInputOption: "RAW",
+      data: zuHarvesten.map(({ rowNumber }) => ({
+        range: `Outreach Queue!P${rowNumber}`,
+        values: [["GELERNT"]],
+      })),
+    },
+  });
+
+  logger.log(`${zuHarvesten.length} Korrekturen weggesichert`);
+  return zuHarvesten.length;
+}
+
+// Schreibt die Agent-Entscheidung (K/L/M) in die Lead-Zeile für spätere Korrektur.
+async function schreibeAgentEntscheidung(
+  sheets: ReturnType<typeof googleSheets>,
+  sheetId: string,
+  rowNumber: number,
+  auszug: string,
+  kategorie: string,
+  antwort: string
+): Promise<void> {
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `Outreach Queue!K${rowNumber}:M${rowNumber}`,
+    valueInputOption: "RAW",
+    requestBody: { values: [[auszug.slice(0, 500), kategorie, antwort.slice(0, 500)]] },
   });
 }
 
