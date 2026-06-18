@@ -12,6 +12,7 @@ import {
   extrahiereMessageId,
   waehleLernbeispiele,
   formatiereLernbeispiele,
+  zuHarvestendeZeilen,
 } from "../src/trigger/reply-classifier";
 
 let bestanden = 0;
@@ -216,6 +217,28 @@ function test12_formatiere(): void {
   assert(!ohneAntwort.includes("bevorzugte Antwort"), "Test 12e: ohne Antwort keine Antwort-Zeile");
 }
 
+// --- Test 13: zuHarvestendeZeilen erkennt korrigierte, noch nicht gelernte Zeilen ---
+function test13_harvest(): void {
+  const mkRow = (over: Record<number, string>) => {
+    const r = new Array(16).fill("");
+    for (const k in over) r[+k] = over[k];
+    return r;
+  };
+  const header = new Array(16).fill("");
+  const r1 = mkRow({ 3: "a@b.de", 10: "Was kostet das?", 11: "ABGELEHNT", 12: "...", 13: "RÜCKFRAGE" }); // N gefüllt → harvest
+  const r2 = mkRow({ 3: "c@d.de", 13: "INTERESSIERT", 15: "GELERNT" }); // schon gelernt → ignorieren
+  const r3 = mkRow({ 3: "e@f.de", 11: "INTERESSIERT" }); // kein Feedback → ignorieren
+  const r4 = mkRow({ 3: "g@h.de", 10: "Ja gerne", 11: "INTERESSIERT", 14: "Mein umformulierter Text" }); // nur O → harvest
+
+  const out = zuHarvestendeZeilen([header, r1, r2, r3, r4]);
+  assert(out.length === 2, "Test 13a: genau 2 Zeilen zum Harvesten");
+  assert(out[0].rowNumber === 2, "Test 13b: rowNumber 1-basiert (erste Datenzeile = 2)");
+  assert(out[0].beispiel.richtigKategorie === "RÜCKFRAGE", "Test 13c: richtige Kategorie aus Spalte N");
+  const r4out = out.find((o) => o.beispiel.leadEmail === "g@h.de")!;
+  assert(r4out.beispiel.richtigKategorie === "INTERESSIERT", "Test 13d: nur O gefüllt → Kategorie fällt auf Agent-Wert (L)");
+  assert(r4out.beispiel.deineAntwort.includes("umformuliert"), "Test 13e: Nios Antwort übernommen");
+}
+
 // --- Alle Tests ausführen ---
 console.log("=== Reply-Classifier Tests ===\n");
 
@@ -233,6 +256,7 @@ test9_leadLookup();
 test10_betreffUndMessageId();
 test11_waehleAusgewogen();
 test12_formatiere();
+test13_harvest();
 
 console.log(
   `\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`

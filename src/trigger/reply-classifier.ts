@@ -247,6 +247,36 @@ export function formatiereLernbeispiele(bsp: Lernbeispiel[]): string {
   return zeilen.join("\n");
 }
 
+type HarvestZeile = { rowNumber: number; beispiel: Lernbeispiel };
+
+// Liefert Queue-Zeilen mit gefülltem N oder O und leerem P (Lern-Flag).
+export function zuHarvestendeZeilen(rows: string[][]): HarvestZeile[] {
+  const result: HarvestZeile[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const richtigKat = (row[13] ?? "").trim(); // N
+    const deineAntwort = (row[14] ?? "").trim(); // O
+    const lernFlag = (row[15] ?? "").trim(); // P
+    if ((richtigKat || deineAntwort) && !lernFlag) {
+      const agentKat = (row[11] ?? "").trim(); // L
+      result.push({
+        rowNumber: i + 1,
+        beispiel: {
+          datum: (row[7] ?? "").trim(), // H
+          leadEmail: (row[3] ?? "").trim().toLowerCase(), // D
+          emailAuszug: (row[10] ?? "").trim(), // K
+          agentKategorie: agentKat,
+          richtigKategorie: richtigKat || agentKat, // N, sonst L (Kategorie war ok)
+          agentAntwort: (row[12] ?? "").trim(), // M
+          deineAntwort,
+        },
+      });
+    }
+  }
+  return result;
+}
+
 // Baut eine RFC822-Antwortmail (für Gmail-Draft oder Brevo-Text)
 export function baueReplyMime(opts: {
   von: string;
