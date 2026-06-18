@@ -247,6 +247,11 @@ export function formatiereLernbeispiele(bsp: Lernbeispiel[]): string {
   return zeilen.join("\n");
 }
 
+// Setzt den Few-Shot-Block vor den Basis-Prompt. Leer → nur Basis.
+export function baueSystemPrompt(fewShot: string): string {
+  return fewShot ? `${ENTSCHEIDUNGS_SKILL}\n\n${fewShot}` : ENTSCHEIDUNGS_SKILL;
+}
+
 type HarvestZeile = { rowNumber: number; beispiel: Lernbeispiel };
 
 // Liefert Queue-Zeilen mit gefülltem N oder O und leerem P (Lern-Flag).
@@ -438,7 +443,7 @@ async function markiereAlsGelesen(uid: number, client: ImapFlow): Promise<void> 
 
 // ─── LLM: Entscheidung treffen ──────────────────────────────────────────────────
 
-export async function entscheideEmail(email: EmailData): Promise<Entscheidung> {
+export async function entscheideEmail(email: EmailData, fewShot: string = ""): Promise<Entscheidung> {
   try {
     const openai = getOpenAI();
     const completion = await openai.chat.completions.create({
@@ -447,7 +452,7 @@ export async function entscheideEmail(email: EmailData): Promise<Entscheidung> {
       max_tokens: 400,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: ENTSCHEIDUNGS_SKILL },
+        { role: "system", content: baueSystemPrompt(fewShot) },
         {
           role: "user",
           content: `Betreff: ${email.subject}\nVon: ${email.from}\nText: ${email.body.slice(0, 600)}`,

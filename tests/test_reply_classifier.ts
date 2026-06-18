@@ -13,6 +13,7 @@ import {
   waehleLernbeispiele,
   formatiereLernbeispiele,
   zuHarvestendeZeilen,
+  baueSystemPrompt,
 } from "../src/trigger/reply-classifier";
 
 let bestanden = 0;
@@ -239,6 +240,16 @@ function test13_harvest(): void {
   assert(r4out.beispiel.deineAntwort.includes("umformuliert"), "Test 13e: Nios Antwort übernommen");
 }
 
+// --- Test 14: baueSystemPrompt hängt Few-Shot an, Basis bleibt ---
+function test14_systemPrompt(): void {
+  const mit = baueSystemPrompt("MEINE-BEISPIELE");
+  assert(mit.includes("MEINE-BEISPIELE"), "Test 14a: Few-Shot im Prompt enthalten");
+  assert(mit.includes("Reply-Agent"), "Test 14b: Basis-Prompt bleibt erhalten");
+  const ohne = baueSystemPrompt("");
+  assert(!ohne.includes("MEINE-BEISPIELE"), "Test 14c: leer → kein Few-Shot");
+  assert(ohne.includes("Reply-Agent"), "Test 14d: Basis-Prompt auch ohne Few-Shot");
+}
+
 // --- Alle Tests ausführen ---
 console.log("=== Reply-Classifier Tests ===\n");
 
@@ -257,6 +268,7 @@ test10_betreffUndMessageId();
 test11_waehleAusgewogen();
 test12_formatiere();
 test13_harvest();
+test14_systemPrompt();
 
 console.log(
   `\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`
