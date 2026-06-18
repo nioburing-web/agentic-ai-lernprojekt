@@ -11,6 +11,7 @@ import {
   baueReBetreff,
   extrahiereMessageId,
   waehleLernbeispiele,
+  formatiereLernbeispiele,
 } from "../src/trigger/reply-classifier";
 
 let bestanden = 0;
@@ -199,6 +200,22 @@ function test11_waehleAusgewogen(): void {
   assert(waehleLernbeispiele([], 5).length === 0, "Test 11e: leere Eingabe → leer");
 }
 
+// --- Test 12: formatiereLernbeispiele baut Few-Shot-Block ---
+function test12_formatiere(): void {
+  assert(formatiereLernbeispiele([]) === "", "Test 12a: leer → leerer String");
+  const b = {
+    datum: "", leadEmail: "x@y.de", emailAuszug: "Was kostet das?",
+    agentKategorie: "ABGELEHNT", richtigKategorie: "RÜCKFRAGE",
+    agentAntwort: "", deineAntwort: "Gerne erkläre ich das im Gespräch.",
+  };
+  const out = formatiereLernbeispiele([b]);
+  assert(out.includes("RÜCKFRAGE"), "Test 12b: enthält richtige Kategorie");
+  assert(out.includes("ABGELEHNT"), "Test 12c: enthält Agent-Fehler");
+  assert(out.includes("Gerne erkläre"), "Test 12d: enthält Nios Antworttext");
+  const ohneAntwort = formatiereLernbeispiele([{ ...b, deineAntwort: "" }]);
+  assert(!ohneAntwort.includes("bevorzugte Antwort"), "Test 12e: ohne Antwort keine Antwort-Zeile");
+}
+
 // --- Alle Tests ausführen ---
 console.log("=== Reply-Classifier Tests ===\n");
 
@@ -215,6 +232,7 @@ test8_korridor();
 test9_leadLookup();
 test10_betreffUndMessageId();
 test11_waehleAusgewogen();
+test12_formatiere();
 
 console.log(
   `\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`

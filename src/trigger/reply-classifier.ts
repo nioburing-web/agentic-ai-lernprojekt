@@ -229,6 +229,24 @@ export function waehleLernbeispiele(alle: Lernbeispiel[], n: number): Lernbeispi
   return ergebnis;
 }
 
+// Baut den Few-Shot-Block für den Prompt. Leer → leerer String.
+export function formatiereLernbeispiele(bsp: Lernbeispiel[]): string {
+  if (bsp.length === 0) return "";
+  const zeilen = [
+    "Aus früheren Korrekturen von Nio (lerne daraus, wiederhole diese Fehler nicht):",
+  ];
+  for (const b of bsp) {
+    const auszug = b.emailAuszug.slice(0, 200);
+    zeilen.push(
+      `- Mail: "${auszug}" → richtig: ${b.richtigKategorie} (du sagtest: ${b.agentKategorie})`
+    );
+    if (b.deineAntwort.trim()) {
+      zeilen.push(`  Nios bevorzugte Antwort: "${b.deineAntwort.slice(0, 300)}"`);
+    }
+  }
+  return zeilen.join("\n");
+}
+
 // Baut eine RFC822-Antwortmail (für Gmail-Draft oder Brevo-Text)
 export function baueReplyMime(opts: {
   von: string;
