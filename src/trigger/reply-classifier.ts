@@ -62,6 +62,16 @@ type LeadRow = {
   email: string;
 };
 
+type Lernbeispiel = {
+  datum: string;
+  leadEmail: string;
+  emailAuszug: string;
+  agentKategorie: string;
+  richtigKategorie: string;
+  agentAntwort: string;
+  deineAntwort: string;
+};
+
 function getOpenAI(): OpenAI {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30000 });
 }
@@ -189,6 +199,34 @@ export function findeLeadRow(rows: string[][], senderEmail: string): LeadRow | n
     }
   }
   return null;
+}
+
+// Wählt die letzten n Korrekturen, ausgewogen über die richtigen Kategorien.
+// Eingabe ist chronologisch (ältestes zuerst, wie im Sheet).
+export function waehleLernbeispiele(alle: Lernbeispiel[], n: number): Lernbeispiel[] {
+  if (n <= 0 || alle.length === 0) return [];
+  const neueste = [...alle].reverse(); // neuestes zuerst
+  const buckets = new Map<string, Lernbeispiel[]>();
+  for (const b of neueste) {
+    const key = b.richtigKategorie || "?";
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(b);
+  }
+  const ergebnis: Lernbeispiel[] = [];
+  const keys = [...buckets.keys()];
+  let fortschritt = true;
+  while (ergebnis.length < n && fortschritt) {
+    fortschritt = false;
+    for (const k of keys) {
+      const bucket = buckets.get(k)!;
+      if (bucket.length > 0) {
+        ergebnis.push(bucket.shift()!);
+        fortschritt = true;
+        if (ergebnis.length >= n) break;
+      }
+    }
+  }
+  return ergebnis;
 }
 
 // Baut eine RFC822-Antwortmail (für Gmail-Draft oder Brevo-Text)

@@ -10,6 +10,7 @@ import {
   findeLeadRow,
   baueReBetreff,
   extrahiereMessageId,
+  waehleLernbeispiele,
 } from "../src/trigger/reply-classifier";
 
 let bestanden = 0;
@@ -179,6 +180,25 @@ function test10_betreffUndMessageId(): void {
   assert(extrahiereMessageId("kein header") === null, "Test 10d: Keine Message-ID → null");
 }
 
+// --- Test 11: waehleLernbeispiele nimmt letzte N, ausgewogen ---
+function test11_waehleAusgewogen(): void {
+  const mk = (kat: string, id: string) => ({
+    datum: "", leadEmail: id + "@x.de", emailAuszug: id, agentKategorie: "X",
+    richtigKategorie: kat, agentAntwort: "", deineAntwort: "",
+  });
+  // chronologisch (ältestes oben): 4x INTERESSIERT, 1x ABGELEHNT
+  const alle = [
+    mk("INTERESSIERT", "i1"), mk("INTERESSIERT", "i2"), mk("ABGELEHNT", "a1"),
+    mk("INTERESSIERT", "i3"), mk("INTERESSIERT", "i4"),
+  ];
+  const sel = waehleLernbeispiele(alle, 3);
+  assert(sel.length === 3, "Test 11a: genau 3 gewählt");
+  assert(sel.some((b) => b.richtigKategorie === "ABGELEHNT"), "Test 11b: Minderheits-Kategorie ABGELEHNT trotzdem dabei");
+  assert(sel[0].emailAuszug === "i4", "Test 11c: neuestes Beispiel zuerst");
+  assert(waehleLernbeispiele(alle, 0).length === 0, "Test 11d: n=0 → leer");
+  assert(waehleLernbeispiele([], 5).length === 0, "Test 11e: leere Eingabe → leer");
+}
+
 // --- Alle Tests ausführen ---
 console.log("=== Reply-Classifier Tests ===\n");
 
@@ -194,6 +214,7 @@ test7b_entscheidungRobust();
 test8_korridor();
 test9_leadLookup();
 test10_betreffUndMessageId();
+test11_waehleAusgewogen();
 
 console.log(
   `\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`
