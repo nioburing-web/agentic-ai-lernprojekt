@@ -296,7 +296,7 @@ async function holeWebsiteText(websiteUrl: string): Promise<string> {
 // Jeder Lead bekommt ein anonymes Kürzel: /r/<id> zählt den Klick, schreibt ihn ins
 // Sheet (Spalte R/S + Tab "Demo Klicks") und leitet auf /demo weiter. Die ID sagt dem
 // Empfänger nichts über sich, sie ist nur in Nios Sheet einem Lead zugeordnet.
-const DEMO_BASIS = "https://kfz-demo-agent.vercel.app";
+const DEMO_BASIS = "https://kfz-demo-agent.netlify.app";
 
 function neueDemoId(): string {
   return randomBytes(3).toString("hex"); // 6 Zeichen, z.B. "7f3a2b"
