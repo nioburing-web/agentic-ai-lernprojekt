@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { schedules, wait } from "@trigger.dev/sdk";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
@@ -61,6 +62,21 @@ async function sicherQueueTab(sheets: ReturnType<typeof googleSheets>, sheetId: 
       requestBody: { values: [QUEUE_HEADER] },
     });
   }
+
+  // R/S sind die Demo-Klick-Spalten. J–Q sind belegt (Fehlergrund, Reply-Classifier,
+  // Nachfass-Datum), deshalb erst ab R.
+  const kopfRS = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${QUEUE_TAB}!R1:S1`,
+  });
+  if (kopfRS.data.values?.[0]?.[0] !== "Demo-ID") {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `${QUEUE_TAB}!R1:S1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [["Demo-ID", "Demo geklickt"]] },
+    });
+  }
 }
 
 async function ladeVorhandeneKontakte(
@@ -87,17 +103,21 @@ async function speichereDraft(
   stadt: string,
   kontakt: string,
   entwurf: string,
-  betreff = ""
+  betreff = "",
+  demoId = ""
 ): Promise<void> {
   const heute = new Date().toLocaleDateString("de-DE", {
     timeZone: "Europe/Berlin",
     day: "2-digit", month: "2-digit", year: "numeric",
   });
+  // A–I wie gehabt, J–Q bleiben leer (gehören anderen Agenten), R = Demo-ID.
+  const zeile = [typ, name, stadt, kontakt, entwurf, "DRAFT", heute, "", betreff,
+    "", "", "", "", "", "", "", "", demoId];
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!A:I`,
+    range: `${QUEUE_TAB}!A:R`,
     valueInputOption: "RAW",
-    requestBody: { values: [[typ, name, stadt, kontakt, entwurf, "DRAFT", heute, "", betreff]] },
+    requestBody: { values: [zeile] },
   });
 }
 
@@ -272,7 +292,19 @@ async function holeWebsiteText(websiteUrl: string): Promise<string> {
 
 // Die Demo, die jeder Lead anklicken kann. Zeigt bewusst eine erfundene
 // "Demo-Werkstatt" — nie den Namen des angeschriebenen Betriebs.
-const DEMO_URL = "https://kfz-demo-agent.vercel.app/demo";
+//
+// Jeder Lead bekommt ein anonymes Kürzel: /r/<id> zählt den Klick, schreibt ihn ins
+// Sheet (Spalte R/S + Tab "Demo Klicks") und leitet auf /demo weiter. Die ID sagt dem
+// Empfänger nichts über sich, sie ist nur in Nios Sheet einem Lead zugeordnet.
+const DEMO_BASIS = "https://kfz-demo-agent.vercel.app";
+
+function neueDemoId(): string {
+  return randomBytes(3).toString("hex"); // 6 Zeichen, z.B. "7f3a2b"
+}
+
+function demoLink(demoId: string): string {
+  return `${DEMO_BASIS}/r/${demoId}`;
+}
 
 const BRANCHE_HOOKS: Record<string, string> = {
   Steuerberater: "60% der Mandantenanfragen gehen an die Kanzlei, die als erstes antwortet — nicht an die beste.",
@@ -320,7 +352,7 @@ const MAIL_ANGLES: { name: string; struktur: string }[] = [
   },
 ];
 
-export async function generiereEmailEntwurf(firma: string, stadt: string, branche: string, website?: string | null, websiteText?: string): Promise<{ betreff: string; inhalt: string }> {
+export async function generiereEmailEntwurf(firma: string, stadt: string, branche: string, website?: string | null, websiteText?: string, link: string = demoLink("demo00")): Promise<{ betreff: string; inhalt: string }> {
   const openai = getOpenAI();
   const branchenHinweis = BRANCHE_HOOKS[branche] ?? "Anfragen werden oft nicht schnell genug beantwortet — der Kunde ist dann schon weg.";
   const websiteAuszug = websiteText && websiteText.trim().length > 80 ? websiteText.trim().slice(0, 1800) : "";
@@ -351,7 +383,8 @@ ${angle.struktur}
 
 DAS HERZSTÜCK DIESER MAIL — der Demo-Link:
 Du hast einen digitalen Assistenten für Werkstätten gebaut. Er läuft, man kann ihn sofort anklicken und selbst mit ihm schreiben. Er beantwortet Fragen zu Leistungen, Öffnungszeiten und groben Preisrahmen und nimmt Terminanfragen auf (Name, Fahrzeug, Anliegen, Wunschzeit).
-- Der Link MUSS wörtlich und vollständig in der Mail stehen, in einer eigenen Zeile: ${DEMO_URL}
+- Der Link MUSS wörtlich, vollständig und unverändert in der Mail stehen, in einer eigenen Zeile: ${link}
+- Ändere den Link NICHT, kürze ihn nicht und bau ihn nicht in einen anderen Text ein.
 - Sag dazu, dass es eine Beispiel-Werkstatt ist, nicht ihre.
 - Gib EINEN konkreten Satz mit, den sie reinschreiben können, z.B.: Meine Bremsen quietschen.
 - Nimm die Hürde: keine Anmeldung, es passiert nichts, niemand meldet sich deswegen.
@@ -464,12 +497,25 @@ export const nachtRecherche = schedules.task({
             console.log(`Zu wenig Website-Text (${websiteText.trim().length} Zeichen) für ${firma.name} – übersprungen`);
             continue;
           }
-          const entwurf = await generiereEmailEntwurf(firma.name, zielstadt, zielbranche, website, websiteText);
-          await speichereDraft(sheets, sheetId, "EMAIL", firma.name, zielstadt, email, entwurf.inhalt, entwurf.betreff);
+          const demoId = neueDemoId();
+          const entwurf = await generiereEmailEntwurf(
+            firma.name, zielstadt, zielbranche, website, websiteText, demoLink(demoId)
+          );
+
+          // Sicherheitsnetz: ohne den Link ist die Mail wertlos (der Klick ist das
+          // einzige Signal, das wir messen). Lieber überspringen als blind senden.
+          if (!entwurf.inhalt.includes(demoId)) {
+            console.log(`Demo-Link fehlt im Entwurf für ${firma.name} – übersprungen`);
+            continue;
+          }
+
+          await speichereDraft(
+            sheets, sheetId, "EMAIL", firma.name, zielstadt, email, entwurf.inhalt, entwurf.betreff, demoId
+          );
           vorhandene.add(email.toLowerCase());
           emailGespeichert++;
 
-          console.log(`E-Mail-Draft: ${firma.name} → ${email}`);
+          console.log(`E-Mail-Draft: ${firma.name} → ${email} (Demo-ID ${demoId})`);
           await wait.for({ seconds: 2 });
         }
       } catch (err) {
