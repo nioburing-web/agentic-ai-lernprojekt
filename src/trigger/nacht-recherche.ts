@@ -270,6 +270,10 @@ async function holeWebsiteText(websiteUrl: string): Promise<string> {
   return text.slice(0, 2500).trim();
 }
 
+// Die Demo, die jeder Lead anklicken kann. Zeigt bewusst eine erfundene
+// "Demo-Werkstatt" — nie den Namen des angeschriebenen Betriebs.
+const DEMO_URL = "https://kfz-demo-agent.vercel.app/demo";
+
 const BRANCHE_HOOKS: Record<string, string> = {
   Steuerberater: "60% der Mandantenanfragen gehen an die Kanzlei, die als erstes antwortet — nicht an die beste.",
   Buchhalter: "Wer eine Buchhaltungsanfrage nicht innerhalb von 2 Stunden beantwortet, verliert sie meist an den nächsten.",
@@ -283,35 +287,40 @@ const BRANCHE_HOOKS: Record<string, string> = {
   Hausverwaltung: "Mieter erwarten Antworten auf Anfragen innerhalb von Stunden — wer nicht schnell reagiert, riskiert Eskalation und schlechte Bewertungen.",
   Tierarztpraxis: "Viele Tierbesitzer rufen abends oder am Wochenende an und finden niemanden — die erste Praxis die reagiert, bekommt den Termin.",
   Notariat: "Mandanten fragen wiederholt nach dem Status ihrer Dokumente — manuelle Statusupdates fressen täglich wertvolle Arbeitszeit.",
-  "Kfz-Werkstatt": "Kunden wollen bei jedem Schritt wissen wann ihr Auto fertig ist — wer proaktiv informiert, bekommt 5-Sterne-Bewertungen.",
+  "Kfz-Werkstatt": "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
+  Autowerkstatt: "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
+  "Kfz-Meisterbetrieb": "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
+  Autoservice: "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
   Fahrschule: "Fahrschüler buchen Stunden und Prüfungen kurzfristig um — manuelle Verwaltung kostet täglich Stunden die fürs Unterrichten fehlen.",
   Heilpraktiker: "Patienten erscheinen nicht zum Termin wenn sie keine Erinnerung bekommen — Ausfallrate sinkt spürbar mit automatischen Erinnerungen.",
 };
 
 // Drei wirklich unterschiedliche Mail-Strukturen, damit die Mails nicht wie ein
 // Serienbrief wirken. Pro Mail wird zufällig eine gewählt.
+// Alle drei laufen auf DASSELBE Ziel zu: den Demo-Link anklicken. Der Beweis
+// ersetzt das alte "ich schick dir bei Gelegenheit mal ein Beispiel".
 const MAIL_ANGLES: { name: string; struktur: string }[] = [
   {
-    name: "detail-frage",
-    struktur: `1. Steig mit EINER konkreten Beobachtung ein, die NUR auf diese Firma zutrifft — beziehe dich auf ein echtes Detail (eine konkret genannte Leistung, ein Schwerpunkt, ein Name, ein Satz von ihrer Seite). KEINE allgemeine Aussage über fehlende Website-Funktionen.
-2. Verknüpfe das in EINEM Satz mit einer konkreten Reibung in ihrem Alltag. Dann EIN Satz dazu, dass du KI-Agenten für genau solche Betriebe baust (nicht behaupten, es sei schon fertig).
-3. Biete konkret an, in 2 Minuten ein passendes Beispiel zu schicken, und gib einen leichten Ausweg ("wenn's nicht passt, kurz Bescheid und ich lass dich in Ruhe"). Variiere die Wortwahl.`,
+    name: "detail-dann-demo",
+    struktur: `1. Steig mit EINER konkreten Beobachtung ein, die NUR auf diese Werkstatt zutrifft — ein echtes Detail von ihrer Seite (eine genannte Leistung, ein Schwerpunkt, eine Marke, ein Satz von ihnen). KEINE allgemeine Aussage über fehlende Website-Funktionen.
+2. EIN Satz zur Reibung: Anrufe kommen, während keiner rangehen kann.
+3. Führ den Demo-Link ein: du hast so einen Assistenten gebaut, er läuft, er kann direkt ausprobiert werden.`,
   },
   {
-    name: "konkrete-idee",
-    struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieser Firma).
-2. Gib dann EINE konkrete, auf sie zugeschnittene Idee, was ein KI-Agent bei genau ihnen übernehmen könnte — spezifisch genug, dass man merkt: du hast wirklich nachgedacht. Kein allgemeines "Anfragen beantworten".
-3. Biete konkret an, ihnen dazu in 2 Minuten ein kurzes Beispiel zu schicken, plus leichter Ausweg ("wenn's nicht passt, kurz Bescheid, dann meld ich mich nicht wieder"). Kein Druck.`,
+    name: "frage-dann-demo",
+    struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieser Werkstatt).
+2. Stell eine echte, kurze Frage dazu, wie sie Anrufe heute abfangen, wenn alle in der Halle stehen — so wie jemand fragt, der das Thema versteht, nicht wie ein Verkäufer.
+3. Führ den Demo-Link ein als das, was du dazu gebaut hast — er läuft, er ist in zehn Sekunden ausprobiert.`,
   },
   {
-    name: "echte-frage",
-    struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein.
-2. Stell eine echte, spezifische Frage dazu, wie sie einen bestimmten Prozess heute handhaben — so wie jemand fragt, der das Thema versteht, nicht wie ein Verkäufer.
-3. Erwähne beiläufig in EINEM Satz, dass du KI-Agenten für solche Betriebe baust, und biete an, in 2 Minuten ein passendes Beispiel zu schicken — mit leichtem Ausweg, falls es gerade nicht passt.`,
+    name: "demo-zuerst",
+    struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieser Werkstatt), kurz gehalten.
+2. Komm SOFORT zum Link: du hast einen Assistenten gebaut, der Anrufer abfängt, Fragen beantwortet und Termine aufnimmt — hier zum Ausprobieren.
+3. Erst DANACH ein Satz dazu, was das für sie hieße (Anfrage liegt fertig auf dem Tisch, mit Name, Fahrzeug, Anliegen, Wunschzeit).`,
   },
 ];
 
-async function generiereEmailEntwurf(firma: string, stadt: string, branche: string, website?: string | null, websiteText?: string): Promise<{ betreff: string; inhalt: string }> {
+export async function generiereEmailEntwurf(firma: string, stadt: string, branche: string, website?: string | null, websiteText?: string): Promise<{ betreff: string; inhalt: string }> {
   const openai = getOpenAI();
   const branchenHinweis = BRANCHE_HOOKS[branche] ?? "Anfragen werden oft nicht schnell genug beantwortet — der Kunde ist dann schon weg.";
   const websiteAuszug = websiteText && websiteText.trim().length > 80 ? websiteText.trim().slice(0, 1800) : "";
@@ -340,19 +349,27 @@ Hintergrundwissen zur Branche (nur Kontext, NICHT wörtlich übernehmen): ${bran
 Struktur für DIESE Mail:
 ${angle.struktur}
 
+DAS HERZSTÜCK DIESER MAIL — der Demo-Link:
+Du hast einen digitalen Assistenten für Werkstätten gebaut. Er läuft, man kann ihn sofort anklicken und selbst mit ihm schreiben. Er beantwortet Fragen zu Leistungen, Öffnungszeiten und groben Preisrahmen und nimmt Terminanfragen auf (Name, Fahrzeug, Anliegen, Wunschzeit).
+- Der Link MUSS wörtlich und vollständig in der Mail stehen, in einer eigenen Zeile: ${DEMO_URL}
+- Sag dazu, dass es eine Beispiel-Werkstatt ist, nicht ihre.
+- Gib EINEN konkreten Satz mit, den sie reinschreiben können, z.B.: Meine Bremsen quietschen.
+- Nimm die Hürde: keine Anmeldung, es passiert nichts, niemand meldet sich deswegen.
+- Behaupte NICHT, du hättest die Demo für sie personalisiert oder ihren Betrieb nachgebaut. Das stimmt nicht.
+
 Regeln:
 - Beginne mit "Hey," (oder einer ähnlich lockeren Anrede) und steig DANN direkt mit dem konkreten Detail ein. Starte NICHT mit "ich habe gesehen", "mir ist aufgefallen", "ich bin auf euch gestoßen" oder einer ähnlichen Beobachtungs-Floskel — das ist der klassische Serienbrief-Einstieg. Der erste inhaltliche Satz muss variieren.
 - Sag in EINEM beiläufigen Halbsatz wer du bist: Nio, baust KI-Agenten in Hamburg. Keine förmliche Vorstellung, kein Lebenslauf.
 - Erwähne ${firma} einmal natürlich im Text
-- Unter 85 Wörter, keine Signatur, keine Anführungszeichen
-- KEIN Preis, kein "2 Wochen"- oder Test-Angebot — die Mail soll Neugier wecken, nicht verkaufen
+- Unter 110 Wörter, keine Signatur, keine Anführungszeichen
+- KEIN Preis, kein "2 Wochen"-Angebot — der Link soll klicken lassen, nicht verkaufen
 - Erfinde keine Ergebnisse, Zahlen oder Referenzkunden
-- Abschluss (unabhängig vom Angle): schließe mit EINEM winzigen, konkreten nächsten Schritt, der fast keine Mühe kostet — z.B. anbieten, in 2 Minuten ein passendes Beispiel oder eine kurze Idee zu schicken. Direkt danach ein leichter Ausweg (Risk-Reversal): wenn's gerade nicht passt, reicht ein kurzes "kein Interesse" und du meldest dich nicht wieder. KEINE vage Floskel wie "Lust die Idee mal weiterzudenken?".
+- Abschluss: EINE weiche, echte Frage, ob das für sie einen Blick wert wäre. Direkt danach ein leichter Ausweg (Risk-Reversal): wenn's gerade nicht passt, reicht ein kurzes "kein Interesse" und du meldest dich nicht wieder.
 - Verbotene Marketing-Wörter: "revolutionieren", "optimieren", "transformieren", "maßgeschneidert", "innovativ", "Lösung", "effizienzsteigerung", "testen"
 - Verbotene Floskeln (zu oft benutzt, wirken wie Serienbrief — formuliere frisch): "liegen bleiben", "genau dieses Problem lösen", "wer zuerst antwortet gewinnt", "Soll ich dir kurz skizzieren wie das bei euch konkret aussehen könnte", "Lust die Idee mal kurz weiterzudenken", "hättet ihr Lust die Idee durchzusprechen"
-- Nutze NICHT als Aufhänger: "keine Online-Terminbuchung", "nur ein Kontaktformular", "kein Live-Chat" — das ist generisch. Finde etwas, das wirklich nach DIESER Firma klingt.
+- Nutze NICHT als Aufhänger: "keine Online-Terminbuchung", "nur ein Kontaktformular", "kein Live-Chat" — das ist generisch. Finde etwas, das wirklich nach DIESER Werkstatt klingt.
 
-Schreibe auch einen Betreff (max 6 Wörter), der sich auf dein konkretes Detail bezieht, klein geschrieben wie von einem Menschen getippt — kein generisches "Interesse an…", "Idee für…" oder "Frage zu…", keine Zahl. Im Betreff gelten dieselben verbotenen Marketing-Wörter wie oben ("optimieren", "Lösung", "transformieren" usw.) — auf keinen Fall verwenden. Der Betreff muss auch für einen Außenstehenden verständlich klingen — KEIN hyper-spezifischer Nischenbegriff von ihrer Seite, der aus dem Kontext gerissen seltsam oder falsch adressiert wirkt.
+Schreibe auch einen Betreff (max 6 Wörter), der sich auf dein konkretes Detail oder auf die verpassten Anrufe bezieht, klein geschrieben wie von einem Menschen getippt — kein generisches "Interesse an…", "Idee für…" oder "Frage zu…", keine Zahl. Im Betreff gelten dieselben verbotenen Marketing-Wörter wie oben ("optimieren", "Lösung", "transformieren" usw.) — auf keinen Fall verwenden. Der Betreff muss auch für einen Außenstehenden verständlich klingen — KEIN hyper-spezifischer Nischenbegriff von ihrer Seite, der aus dem Kontext gerissen seltsam oder falsch adressiert wirkt.
 Format:
 BETREFF: <betreff>
 EMAIL: <email-text>`,
@@ -388,19 +405,24 @@ export const nachtRecherche = schedules.task({
     await sicherQueueTab(sheets, sheetId);
     const vorhandene = await ladeVorhandeneKontakte(sheets, sheetId);
 
-    const SUCHBEGRIFFE = [
-      "Buchhalter", "Steuerberater", "Buchhaltung", "Immobilienmakler",
-      "Rechtsanwalt", "Unternehmensberater", "Zahnarzt", "Physiotherapie",
-      "Versicherungsmakler", "Hausverwaltung", "Tierarztpraxis", "Notariat",
-      "Kfz-Werkstatt", "Fahrschule", "Heilpraktiker",
+    // Nische seit dem Pivot am 13.07.2026: nur KFZ-Werkstätten. Grund: der Demo-Link
+    // zeigt eine Werkstatt. Eine Zahnarztpraxis mit einer Werkstatt-Demo anzuschreiben
+    // wäre unpassend. Die vier Begriffe sind dieselbe Branche, nur andere Suchwörter —
+    // sie halten den Lead-Pool gefüllt, ohne die Nische zu verlassen.
+    const SUCHBEGRIFFE = ["Kfz-Werkstatt", "Autowerkstatt", "Kfz-Meisterbetrieb", "Autoservice"];
+    const STAEDTE = [
+      "Hamburg", "Berlin", "Köln", "München", "Stuttgart", "Frankfurt", "Düsseldorf", "Leipzig",
+      "Dortmund", "Essen", "Bremen", "Dresden", "Hannover", "Nürnberg", "Duisburg", "Bochum",
+      "Wuppertal", "Bielefeld", "Bonn", "Münster", "Karlsruhe", "Mannheim", "Augsburg", "Wiesbaden",
     ];
-    const STAEDTE = ["Hamburg", "Berlin", "Köln", "München", "Stuttgart", "Frankfurt", "Düsseldorf", "Leipzig"];
-    const dayOfWeek = new Date().getDay();
-    const stadtIndex = ((dayOfWeek - 1) + STAEDTE.length) % STAEDTE.length;
-    const zielstadt = STAEDTE[stadtIndex]!;
+    // Städte rotieren über den Jahrestag, damit derselbe Ort nicht jede Woche drankommt.
+    const tagImJahr = Math.floor(
+      (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000
+    );
+    const zielstadt = STAEDTE[tagImJahr % STAEDTE.length]!;
 
-    // 4 zufällige Branchen für diese Nacht
-    const zielBranchen = [...SUCHBEGRIFFE].sort(() => Math.random() - 0.5).slice(0, 4);
+    // Alle vier Suchbegriffe derselben Nische, Reihenfolge gemischt.
+    const zielBranchen = [...SUCHBEGRIFFE].sort(() => Math.random() - 0.5);
 
     console.log(`Ziel: ${zielBranchen.join(", ")} in ${zielstadt}`);
 
