@@ -420,6 +420,21 @@ EMAIL: <email-text>`,
   };
 }
 
+// Wählt pro Nacht ein zusammenhängendes Städte-Fenster aus der Rotation. Startet
+// am Tages-Offset (tagImJahr) und nimmt `anzahl` aufeinanderfolgende Städte, am
+// Array-Ende umlaufend. Folgetage verschieben das Fenster um 1 → keine identischen
+// Batches an aufeinanderfolgenden Tagen, aber jede Stadt kommt regelmäßig dran.
+export function waehleStaedte(alle: string[], tagImJahr: number, anzahl: number): string[] {
+  const laenge = alle.length;
+  if (laenge === 0) return [];
+  const start = ((tagImJahr % laenge) + laenge) % laenge;
+  const out: string[] = [];
+  for (let i = 0; i < Math.min(anzahl, laenge); i++) {
+    out.push(alle[(start + i) % laenge]!);
+  }
+  return out;
+}
+
 // ─── Main Task ────────────────────────────────────────────────────────────────
 // LinkedIn-Outreach läuft separat über Claude + LinkedIn MCP (linkedin-outreach Skill)
 
@@ -430,7 +445,7 @@ export const nachtRecherche = schedules.task({
     timezone: "Europe/Berlin",
   },
   machine: "small-2x",
-  maxDuration: 600,
+  maxDuration: 900,
   run: async () => {
     console.log("=== Nacht-Recherche gestartet ===");
 
@@ -440,86 +455,106 @@ export const nachtRecherche = schedules.task({
 
     // Nische seit dem Pivot am 13.07.2026: nur KFZ-Werkstätten. Grund: der Demo-Link
     // zeigt eine Werkstatt. Eine Zahnarztpraxis mit einer Werkstatt-Demo anzuschreiben
-    // wäre unpassend. Die vier Begriffe sind dieselbe Branche, nur andere Suchwörter —
-    // sie halten den Lead-Pool gefüllt, ohne die Nische zu verlassen.
+    // wäre unpassend.
     const SUCHBEGRIFFE = ["Kfz-Werkstatt", "Autowerkstatt", "Kfz-Meisterbetrieb", "Autoservice"];
     const STAEDTE = [
       "Hamburg", "Berlin", "Köln", "München", "Stuttgart", "Frankfurt", "Düsseldorf", "Leipzig",
       "Dortmund", "Essen", "Bremen", "Dresden", "Hannover", "Nürnberg", "Duisburg", "Bochum",
       "Wuppertal", "Bielefeld", "Bonn", "Münster", "Karlsruhe", "Mannheim", "Augsburg", "Wiesbaden",
     ];
+
+    // Ertrags-Fix (15.07.2026): Die vier KFZ-Synonyme überlappen stark (~halbe
+    // Maps-Treffer sind Dubletten), eine Stadt liefert daher nur ~5-6 verwertbare
+    // Leads. Geografische Breite statt Begriffs-Breite: mehrere Städte pro Nacht
+    // abarbeiten, bis der Tages-Deckel erreicht ist. Hebt den Ertrag von ~1 auf ~20-30.
+    const STAEDTE_PRO_NACHT = 6;   // Fenster; bricht früher ab sobald Deckel erreicht
+    const BEGRIFFE_PRO_STADT = 2;  // 2 der 4 Synonyme reichen (Rest ist Überlappung)
+    const TAGES_DECKEL = 30;
+
     // Städte rotieren über den Jahrestag, damit derselbe Ort nicht jede Woche drankommt.
     const tagImJahr = Math.floor(
       (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000
     );
-    const zielstadt = STAEDTE[tagImJahr % STAEDTE.length]!;
+    const zielStaedte = waehleStaedte(STAEDTE, tagImJahr, STAEDTE_PRO_NACHT);
 
-    // Alle vier Suchbegriffe derselben Nische, Reihenfolge gemischt.
-    const zielBranchen = [...SUCHBEGRIFFE].sort(() => Math.random() - 0.5);
-
-    console.log(`Ziel: ${zielBranchen.join(", ")} in ${zielstadt}`);
+    console.log(`Ziel-Städte (${zielStaedte.length}): ${zielStaedte.join(", ")}`);
 
     // ── Phase 1: E-Mail-Leads ─────────────────────────────────────────────────
     console.log("Phase 1: E-Mail-Leads recherchieren...");
     let emailGespeichert = 0;
 
-    for (const zielbranche of zielBranchen) {
-      if (emailGespeichert >= 30) break;
-      console.log(`Branche: ${zielbranche}...`);
+    for (const zielstadt of zielStaedte) {
+      if (emailGespeichert >= TAGES_DECKEL) break;
 
-      try {
-        const firmen = await suchePerGoogleMaps(zielbranche, zielstadt);
+      // Pro Stadt eine frische, gemischte Auswahl der Suchbegriffe.
+      const zielBranchen = [...SUCHBEGRIFFE].sort(() => Math.random() - 0.5).slice(0, BEGRIFFE_PRO_STADT);
+      console.log(`Stadt: ${zielstadt} (${zielBranchen.join(", ")})...`);
 
-        for (const firma of firmen) {
-          if (emailGespeichert >= 30) break;
+      for (const zielbranche of zielBranchen) {
+        if (emailGespeichert >= TAGES_DECKEL) break;
 
-          const website = await holeWebsiteVonPlaceDetails(firma.placeId);
-          if (!website) continue;
+        try {
+          const firmen = await suchePerGoogleMaps(zielbranche, zielstadt);
 
-          const email = await findeEmailAufWebsite(website);
-          if (!email) continue;
+          for (const firma of firmen) {
+            if (emailGespeichert >= TAGES_DECKEL) break;
 
-          const emailDomain = email.split("@")[1]?.toLowerCase() ?? "";
-          if (IGNORIERTE_DOMAINS.some(d => emailDomain.includes(d) || firma.name?.toLowerCase().includes(d))) {
-            console.log(`Kammer/Verband übersprungen: ${firma.name} (${email})`);
-            continue;
+            // Fehler-Isolation pro Shop: ein einzelner Fetch-/LLM-/Sheets-Fehler
+            // darf nicht die restlichen Shops dieses Begriffs mitreißen (vorher lag
+            // das try/catch pro Suchbegriff → ein Fehler killte ~20 Shops).
+            try {
+              const website = await holeWebsiteVonPlaceDetails(firma.placeId);
+              if (!website) continue;
+
+              const email = await findeEmailAufWebsite(website);
+              if (!email) continue;
+
+              const emailDomain = email.split("@")[1]?.toLowerCase() ?? "";
+              if (IGNORIERTE_DOMAINS.some(d => emailDomain.includes(d) || firma.name?.toLowerCase().includes(d))) {
+                console.log(`Kammer/Verband übersprungen: ${firma.name} (${email})`);
+                continue;
+              }
+
+              if (vorhandene.has(email.toLowerCase())) {
+                console.log(`Bereits in Queue: ${email}`);
+                continue;
+              }
+
+              const websiteText = await holeWebsiteText(website);
+              // Quality-Gate: ohne genug echten Website-Text gibt es keinen ehrlichen,
+              // firmenspezifischen Aufhänger → Lead überspringen statt generisch anschreiben.
+              if (websiteText.trim().length < 300) {
+                console.log(`Zu wenig Website-Text (${websiteText.trim().length} Zeichen) für ${firma.name} – übersprungen`);
+                continue;
+              }
+              const demoId = neueDemoId();
+              const entwurf = await generiereEmailEntwurf(
+                firma.name, zielstadt, zielbranche, website, websiteText, demoLink(demoId)
+              );
+
+              // Sicherheitsnetz: ohne den Link ist die Mail wertlos (der Klick ist das
+              // einzige Signal, das wir messen). Lieber überspringen als blind senden.
+              if (!entwurf.inhalt.includes(demoId)) {
+                console.log(`Demo-Link fehlt im Entwurf für ${firma.name} – übersprungen`);
+                continue;
+              }
+
+              await speichereDraft(
+                sheets, sheetId, "EMAIL", firma.name, zielstadt, email, entwurf.inhalt, entwurf.betreff, demoId
+              );
+              vorhandene.add(email.toLowerCase());
+              emailGespeichert++;
+
+              console.log(`E-Mail-Draft: ${firma.name} → ${email} (${zielstadt}, Demo-ID ${demoId})`);
+              await wait.for({ seconds: 2 });
+            } catch (shopErr) {
+              console.error(`Shop ${firma.name} übersprungen:`, shopErr);
+              continue;
+            }
           }
-
-          if (vorhandene.has(email.toLowerCase())) {
-            console.log(`Bereits in Queue: ${email}`);
-            continue;
-          }
-
-          const websiteText = await holeWebsiteText(website);
-          // Quality-Gate: ohne genug echten Website-Text gibt es keinen ehrlichen,
-          // firmenspezifischen Aufhänger → Lead überspringen statt generisch anschreiben.
-          if (websiteText.trim().length < 300) {
-            console.log(`Zu wenig Website-Text (${websiteText.trim().length} Zeichen) für ${firma.name} – übersprungen`);
-            continue;
-          }
-          const demoId = neueDemoId();
-          const entwurf = await generiereEmailEntwurf(
-            firma.name, zielstadt, zielbranche, website, websiteText, demoLink(demoId)
-          );
-
-          // Sicherheitsnetz: ohne den Link ist die Mail wertlos (der Klick ist das
-          // einzige Signal, das wir messen). Lieber überspringen als blind senden.
-          if (!entwurf.inhalt.includes(demoId)) {
-            console.log(`Demo-Link fehlt im Entwurf für ${firma.name} – übersprungen`);
-            continue;
-          }
-
-          await speichereDraft(
-            sheets, sheetId, "EMAIL", firma.name, zielstadt, email, entwurf.inhalt, entwurf.betreff, demoId
-          );
-          vorhandene.add(email.toLowerCase());
-          emailGespeichert++;
-
-          console.log(`E-Mail-Draft: ${firma.name} → ${email} (Demo-ID ${demoId})`);
-          await wait.for({ seconds: 2 });
+        } catch (err) {
+          console.error(`${zielbranche}/${zielstadt} Fehler:`, err);
         }
-      } catch (err) {
-        console.error(`${zielbranche} Fehler:`, err);
       }
     }
 
