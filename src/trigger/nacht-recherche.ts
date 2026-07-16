@@ -95,6 +95,17 @@ async function ladeVorhandeneKontakte(
   return kontakte;
 }
 
+// Letzte Zeile (1-basiert, ohne Header-Offset), die irgendwo in A–R noch etwas stehen hat.
+// Bewusst über den ganzen Block statt nur über Spalte A: eine Zeile, deren A leer ist,
+// aber deren R belegt ist, darf nicht überschrieben werden.
+export function letzteBelegteZeile(rows: unknown[][]): number {
+  let letzte = 0;
+  rows.forEach((row, i) => {
+    if (row?.some(zelle => String(zelle ?? "").trim() !== "")) letzte = i + 1;
+  });
+  return letzte;
+}
+
 async function speichereDraft(
   sheets: ReturnType<typeof googleSheets>,
   sheetId: string,
@@ -104,7 +115,8 @@ async function speichereDraft(
   kontakt: string,
   entwurf: string,
   betreff = "",
-  demoId = ""
+  demoId = "",
+  tab: string = QUEUE_TAB
 ): Promise<void> {
   const heute = new Date().toLocaleDateString("de-DE", {
     timeZone: "Europe/Berlin",
@@ -113,13 +125,26 @@ async function speichereDraft(
   // A–I wie gehabt, J–Q bleiben leer (gehören anderen Agenten), R = Demo-ID.
   const zeile = [typ, name, stadt, kontakt, entwurf, "DRAFT", heute, "", betreff,
     "", "", "", "", "", "", "", "", demoId];
-  await sheets.spreadsheets.values.append({
+
+  // Kein values.append: dessen Tabellen-Erkennung sucht sich im Bereich A:R eine
+  // "Tabelle" und fand ab dem 14.07.2026 den Demo-ID-Block in R1:S1 — jede Zeile
+  // landete dann in R:AI statt A:I und war für morgen-versand unsichtbar.
+  // Deshalb Zielzeile selbst bestimmen und per update fest nach A<n>:R<n> schreiben.
+  const bestand = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!A:R`,
+    range: `${tab}!A:R`,
+  });
+  const zielZeile = letzteBelegteZeile(bestand.data.values ?? []) + 1;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `${tab}!A${zielZeile}:R${zielZeile}`,
     valueInputOption: "RAW",
     requestBody: { values: [zeile] },
   });
 }
+
+export const _test = { speichereDraft };
 
 // ─── E-Mail Research ──────────────────────────────────────────────────────────
 
@@ -182,7 +207,7 @@ function findeImpressumLink(html: string, baseUrl: string): string | null {
   return null;
 }
 
-async function findeEmailAufWebsite(websiteUrl: string): Promise<string | null> {
+export async function findeEmailAufWebsite(websiteUrl: string): Promise<string | null> {
   let baseUrl = websiteUrl;
   if (!baseUrl.startsWith("http")) baseUrl = "https://" + websiteUrl;
   baseUrl = baseUrl.replace(/\/$/, "");
@@ -262,7 +287,7 @@ function htmlZuText(html: string): string {
 }
 
 // Zieht echten Seiten-Text (Startseite + Leistungen/Über-uns) für eine WAHRE Beobachtung.
-async function holeWebsiteText(websiteUrl: string): Promise<string> {
+export async function holeWebsiteText(websiteUrl: string): Promise<string> {
   let baseUrl = websiteUrl;
   if (!baseUrl.startsWith("http")) baseUrl = "https://" + websiteUrl;
   baseUrl = baseUrl.replace(/\/$/, "");
@@ -463,10 +488,13 @@ export const nachtRecherche = schedules.task({
       "Wuppertal", "Bielefeld", "Bonn", "Münster", "Karlsruhe", "Mannheim", "Augsburg", "Wiesbaden",
     ];
 
-    // Ertrags-Fix (15.07.2026): Die vier KFZ-Synonyme überlappen stark (~halbe
-    // Maps-Treffer sind Dubletten), eine Stadt liefert daher nur ~5-6 verwertbare
-    // Leads. Geografische Breite statt Begriffs-Breite: mehrere Städte pro Nacht
-    // abarbeiten, bis der Tages-Deckel erreicht ist. Hebt den Ertrag von ~1 auf ~20-30.
+    // Geografische Breite statt Begriffs-Breite: die vier KFZ-Synonyme überlappen
+    // stark, eine Stadt liefert nur ~10-15 verwertbare Leads. Mehrere Städte pro
+    // Nacht abarbeiten, bis der Tages-Deckel erreicht ist.
+    //
+    // Achtung bei der Fehlersuche: der "1 Lead pro Nacht"-Effekt am 14.07.2026 kam
+    // NICHT vom Suchbegriff-Zuschnitt. Der Ertrag war die ganze Zeit in Ordnung — die
+    // Drafts landeten nur in den falschen Spalten (siehe speichereDraft).
     const STAEDTE_PRO_NACHT = 6;   // Fenster; bricht früher ab sobald Deckel erreicht
     const BEGRIFFE_PRO_STADT = 2;  // 2 der 4 Synonyme reichen (Rest ist Überlappung)
     const TAGES_DECKEL = 30;
