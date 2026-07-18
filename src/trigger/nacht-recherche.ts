@@ -377,10 +377,102 @@ const MAIL_ANGLES: { name: string; struktur: string }[] = [
   },
 ];
 
-export async function generiereEmailEntwurf(firma: string, stadt: string, branche: string, website?: string | null, websiteText?: string, link: string = demoLink("demo00")): Promise<{ betreff: string; inhalt: string }> {
+// Betreff-Blickwinkel. Am 17.07.2026 gingen 30 Erstmails raus, 19 davon trugen
+// wörtlich "Anruf" im Betreff, zwei Paare waren exakt identisch — Open Rate 10%
+// gegenüber 38% bei den Nachfass-Mails desselben Tages. Ursache im Prompt: der
+// Betreff durfte sich wahlweise "auf das konkrete Detail ODER auf die verpassten
+// Anrufe" beziehen, und das Modell griff zur immer verfügbaren zweiten Option.
+//
+// Deshalb: kein Zufall wie bei MAIL_ANGLES, sondern harte Rotation über den
+// Lauf-Index. Bei 30 Mails pro Nacht kommt so jeder Blickwinkel ~6x vor statt
+// einer Kategorie 19x.
+const BETREFF_ANGLES: { name: string; anweisung: string }[] = [
+  {
+    name: "leistung",
+    anweisung: "Nimm EINE konkrete Leistung oder einen Schwerpunkt, der wörtlich im Website-Auszug steht (z.B. Klimaservice, Getriebeinstandsetzung, Oldtimer). Der Betreff benennt diese Leistung.",
+  },
+  {
+    name: "echte-frage",
+    anweisung: "Formuliere den Betreff als kurze, echte Frage zum Arbeitsalltag dieser Werkstatt — aber OHNE das Wort Anruf oder Telefon. Etwas, das ein Kollege fragen würde.",
+  },
+  {
+    name: "marke-fahrzeug",
+    anweisung: "Nimm eine Fahrzeugmarke, einen Fahrzeugtyp oder eine Spezialisierung aus dem Website-Auszug (z.B. VW, Transporter, Hybrid) und bau den Betreff darum.",
+  },
+  {
+    name: "ort-betrieb",
+    anweisung: "Nimm etwas, das diesen Betrieb an seinem Ort auszeichnet — Stadtteil, Familienbetrieb, Jahreszahl, Bewertung — und bau den Betreff darum.",
+  },
+  {
+    name: "kundensicht",
+    anweisung: "Schreib den Betreff aus Sicht eines KUNDEN dieser Werkstatt, als wäre es der Anfang einer echten Kundenanfrage (z.B. \"termin für die hu?\"). Kein Wort über Anrufe.",
+  },
+];
+
+// Deterministische Rotation: über einen Lauf mit 30 Mails ist damit garantiert,
+// dass alle Blickwinkel vorkommen. Math.random() garantiert das nicht.
+export function waehleBetreffAngle(index: number): { name: string; anweisung: string } {
+  const i = ((index % BETREFF_ANGLES.length) + BETREFF_ANGLES.length) % BETREFF_ANGLES.length;
+  return BETREFF_ANGLES[i]!;
+}
+
+// Betreffe auf einen Vergleichskern reduzieren, damit "verpasste Anrufe abfangen"
+// und "Verpasste Anrufe  abfangen!" als dieselbe Formulierung erkannt werden.
+export function betreffKern(betreff: string): string {
+  return betreff
+    .toLowerCase()
+    .replace(/[^a-zäöüß0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Die Wörter, die am 17.07.2026 in 19 von 30 Betreffen standen. Im Mailtext sind
+// sie weiter erlaubt und erwünscht — nur die Betreffzeile muss variieren.
+const BETREFF_VERBOTEN = ["anruf", "anrufen", "anrufe", "telefon", "verpasst"];
+
+export function betreffIstBrauchbar(betreff: string, verbrauchte: string[] = []): boolean {
+  const kern = betreffKern(betreff);
+  if (kern.length === 0) return false;
+  if (BETREFF_VERBOTEN.some((wort) => kern.includes(wort))) return false;
+  if (verbrauchte.some((b) => betreffKern(b) === kern)) return false;
+  return true;
+}
+
+// Jeder Mail-Entwurf ist ein eigener API-Call ohne Wissen über die anderen 29 des
+// Laufs. Das Modell KANN Wiederholung also nicht selbst vermeiden — "formuliere
+// frisch" im Prompt reicht prinzipiell nicht. Deshalb bekommt es die zuletzt
+// verwendeten Betreffe explizit als verbraucht mitgegeben.
+async function ladeLetzteBetreffe(
+  sheets: ReturnType<typeof googleSheets>,
+  sheetId: string,
+  anzahl = 40
+): Promise<string[]> {
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${QUEUE_TAB}!I:I`,
+  });
+  const rows = response.data.values ?? [];
+  const betreffe = rows
+    .slice(1)
+    .map((row) => String(row?.[0] ?? "").trim())
+    .filter((b) => b.length > 0);
+  return betreffe.slice(-anzahl);
+}
+
+export async function generiereEmailEntwurf(
+  firma: string,
+  stadt: string,
+  branche: string,
+  website?: string | null,
+  websiteText?: string,
+  link: string = demoLink("demo00"),
+  betreffIndex = 0,
+  verbrauchteBetreffe: string[] = []
+): Promise<{ betreff: string; inhalt: string }> {
   const openai = getOpenAI();
   const branchenHinweis = BRANCHE_HOOKS[branche] ?? "Anfragen werden oft nicht schnell genug beantwortet — der Kunde ist dann schon weg.";
   const websiteAuszug = websiteText && websiteText.trim().length > 80 ? websiteText.trim().slice(0, 1800) : "";
+  const betreffAngle = waehleBetreffAngle(betreffIndex);
 
   // Ohne brauchbaren Website-Auszug ist keine echte Personalisierung möglich →
   // immer "echte-frage" (ehrliche Frage statt erfundener Beobachtung).
@@ -388,17 +480,13 @@ export async function generiereEmailEntwurf(firma: string, stadt: string, branch
     ? MAIL_ANGLES[Math.floor(Math.random() * MAIL_ANGLES.length)]!
     : MAIL_ANGLES[2]!;
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0.9,
-    max_tokens: 350,
-    messages: [
+  const nachrichten = [
       {
-        role: "system",
+        role: "system" as const,
         content: "Du bist Nio Büring, 19 Jahre alt aus Hamburg. Du schreibst Kaltakquise-E-Mails — so als hättest du dir wirklich kurz die Website der Firma angeschaut und schreibst direkt drauflos. Kein Marketingsprech, keine Floskeln, kein Ausrufezeichen. Klingt wie von einem echten Menschen getippt, nicht wie KI. Du erfindest NIE Fakten über die Firma und NIE Ergebnisse oder Referenzkunden — du hast noch keine vorzuweisen. Deine Glaubwürdigkeit kommt aus Spezifität, nicht aus behaupteten Erfolgen.",
       },
       {
-        role: "user",
+        role: "user" as const,
         content: `Schreibe eine kurze Kaltakquise-E-Mail an ${firma} in ${stadt} (${branche}).
 ${websiteAuszug ? `\nAuszug von DEREN Website (nur das hier ist echt — beziehe deine Beobachtung darauf):\n"""${websiteAuszug}"""\n` : "\n(Kein brauchbarer Website-Auszug vorhanden — erfinde KEINE Beobachtung über die Firma.)\n"}
 Hintergrundwissen zur Branche (nur Kontext, NICHT wörtlich übernehmen): ${branchenHinweis}
@@ -427,22 +515,49 @@ Regeln:
 - Verbotene Floskeln (zu oft benutzt, wirken wie Serienbrief — formuliere frisch): "liegen bleiben", "genau dieses Problem lösen", "wer zuerst antwortet gewinnt", "Soll ich dir kurz skizzieren wie das bei euch konkret aussehen könnte", "Lust die Idee mal kurz weiterzudenken", "hättet ihr Lust die Idee durchzusprechen"
 - Nutze NICHT als Aufhänger: "keine Online-Terminbuchung", "nur ein Kontaktformular", "kein Live-Chat" — das ist generisch. Finde etwas, das wirklich nach DIESER Werkstatt klingt.
 
-Schreibe auch einen Betreff (max 6 Wörter), der sich auf dein konkretes Detail oder auf die verpassten Anrufe bezieht, klein geschrieben wie von einem Menschen getippt — kein generisches "Interesse an…", "Idee für…" oder "Frage zu…", keine Zahl. Im Betreff gelten dieselben verbotenen Marketing-Wörter wie oben ("optimieren", "Lösung", "transformieren" usw.) — auf keinen Fall verwenden. Der Betreff muss auch für einen Außenstehenden verständlich klingen — KEIN hyper-spezifischer Nischenbegriff von ihrer Seite, der aus dem Kontext gerissen seltsam oder falsch adressiert wirkt.
+BETREFF — eigene Aufgabe, nicht nebenbei erledigen:
+Blickwinkel für DIESEN Betreff (verbindlich): ${betreffAngle.anweisung}
+- Max 6 Wörter, klein geschrieben wie von einem Menschen getippt, keine Zahl.
+- Der Betreff darf das Wort "Anruf", "anrufen" oder "Telefon" NICHT enthalten. Auch nicht "verpasst". Das Thema gehört in den Mailtext, nicht in die Betreffzeile.
+- Kein generisches "Interesse an…", "Idee für…", "Frage zu…". Dieselben verbotenen Marketing-Wörter wie oben gelten auch hier.
+- Der Betreff muss auch für einen Außenstehenden verständlich klingen — KEIN hyper-spezifischer Nischenbegriff von ihrer Seite, der aus dem Kontext gerissen seltsam wirkt.
+${verbrauchteBetreffe.length > 0 ? `- VERBRAUCHT — diese Betreffe wurden bereits an andere Werkstätten geschickt. Formuliere etwas erkennbar anderes, nicht bloß umgestellt:\n${verbrauchteBetreffe.map((b) => `  · ${b}`).join("\n")}\n` : ""}
 Format:
 BETREFF: <betreff>
 EMAIL: <email-text>`,
       },
-    ],
-  });
+  ];
 
-  const raw = completion.choices[0]?.message?.content?.trim() ?? "";
-  const betreffMatch = raw.match(/BETREFF:\s*(.+)/);
-  const emailMatch = raw.match(/EMAIL:\s*([\s\S]+)/);
+  async function erzeuge(extra?: string): Promise<{ betreff: string; inhalt: string }> {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.9,
+      max_tokens: 350,
+      messages: extra
+        ? [...nachrichten, { role: "user" as const, content: extra }]
+        : nachrichten,
+    });
+    const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+    return {
+      betreff: raw.match(/BETREFF:\s*(.+)/)?.[1]?.trim() ?? "kurze frage",
+      inhalt: raw.match(/EMAIL:\s*([\s\S]+)/)?.[1]?.trim() ?? raw,
+    };
+  }
 
-  return {
-    betreff: betreffMatch?.[1]?.trim() ?? "kurze frage",
-    inhalt: emailMatch?.[1]?.trim() ?? raw,
-  };
+  // Eine Prompt-Regel ist keine Garantie. Der Ausfall vom 17.07. entstand genau
+  // dadurch, dass dem Prompt vertraut und das Ergebnis nie geprüft wurde.
+  // Also: Ergebnis prüfen, bei Verstoß einmal gezielt nachfassen.
+  let ergebnis = await erzeuge();
+  if (!betreffIstBrauchbar(ergebnis.betreff, verbrauchteBetreffe)) {
+    console.log(`Betreff verworfen ("${ergebnis.betreff}") – Neuversuch für ${firma}`);
+    ergebnis = await erzeuge(
+      `Der Betreff "${ergebnis.betreff}" ist unbrauchbar: er enthält ein verbotenes Wort (Anruf/anrufen/Telefon/verpasst) oder wiederholt einen bereits verschickten Betreff. Gib die Mail unverändert erneut aus, aber mit einem NEUEN Betreff nach diesem Blickwinkel: ${betreffAngle.anweisung} Wieder im Format BETREFF: / EMAIL:.`
+    );
+    if (!betreffIstBrauchbar(ergebnis.betreff, verbrauchteBetreffe)) {
+      console.log(`Betreff auch im 2. Versuch unbrauchbar ("${ergebnis.betreff}") für ${firma}`);
+    }
+  }
+  return ergebnis;
 }
 
 // Wählt pro Nacht ein zusammenhängendes Städte-Fenster aus der Rotation. Startet
@@ -477,6 +592,11 @@ export const nachtRecherche = schedules.task({
     const { sheets, sheetId } = await getQueue();
     await sicherQueueTab(sheets, sheetId);
     const vorhandene = await ladeVorhandeneKontakte(sheets, sheetId);
+    // Betreff-Historie: verhindert, dass Nacht für Nacht dieselben Formulierungen
+    // rausgehen. Wächst im Lauf mit jedem neuen Betreff weiter.
+    const verbrauchteBetreffe = await ladeLetzteBetreffe(sheets, sheetId);
+    let betreffIndex = 0;
+    console.log(`${verbrauchteBetreffe.length} bisherige Betreffe geladen (werden als verbraucht behandelt)`);
 
     // Nische seit dem Pivot am 13.07.2026: nur KFZ-Werkstätten. Grund: der Demo-Link
     // zeigt eine Werkstatt. Eine Zahnarztpraxis mit einer Werkstatt-Demo anzuschreiben
@@ -557,8 +677,13 @@ export const nachtRecherche = schedules.task({
               }
               const demoId = neueDemoId();
               const entwurf = await generiereEmailEntwurf(
-                firma.name, zielstadt, zielbranche, website, websiteText, demoLink(demoId)
+                firma.name, zielstadt, zielbranche, website, websiteText, demoLink(demoId),
+                betreffIndex, verbrauchteBetreffe
               );
+              betreffIndex++;
+              // Sofort als verbraucht führen, damit die nächste Mail desselben Laufs
+              // den Betreff nicht wiederholt (17.07.: 2 exakte Duplikate im Batch).
+              if (entwurf.betreff) verbrauchteBetreffe.push(entwurf.betreff);
 
               // Sicherheitsnetz: ohne den Link ist die Mail wertlos (der Klick ist das
               // einzige Signal, das wir messen). Lieber überspringen als blind senden.
