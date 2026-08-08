@@ -580,10 +580,13 @@ export function waehleStaedte(alle: string[], tagImJahr: number, anzahl: number)
 
 export const nachtRecherche = schedules.task({
   id: "nacht-recherche",
-  cron: {
-    pattern: "0 23 * * 0-4", // 23:00 CEST So–Do → bereit für Mo–Fr morgens
-    timezone: "Europe/Berlin",
-  },
+  // Cron pausiert am 08.08.2026 (Nios Wunsch): KFZ-Lead-Pool erschöpft, Lauf lief
+  // ab 29.07. jede Nacht ins Timeout (0 neue Leads). Bleibt aus bis zum Nische-neu-
+  // Umbau via /level-up. Reaktivieren: cron-Block wieder einkommentieren + deployen.
+  // cron: {
+  //   pattern: "0 23 * * 0-4", // 23:00 CEST So–Do → bereit für Mo–Fr morgens
+  //   timezone: "Europe/Berlin",
+  // },
   machine: "small-2x",
   maxDuration: 900,
   run: async () => {

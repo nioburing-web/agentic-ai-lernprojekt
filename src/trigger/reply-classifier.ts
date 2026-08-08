@@ -650,6 +650,8 @@ async function sendeReport(zeilen: string[]): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY;
   const absenderEmail = process.env.ABSENDER_EMAIL;
   if (!apiKey || !absenderEmail) return;
+  // Report-Mail deaktiviert auf Nios Wunsch (2026-07-06) — Crash-Alarme laufen weiter über agent-health-monitor. Reaktivieren: nächste Zeile entfernen.
+  return;
   const heute = new Date().toLocaleDateString("de-DE", {
     timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric",
   });

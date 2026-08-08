@@ -16,7 +16,7 @@ r = requests.post(
     auth=("api", MAILGUN_API_KEY),
     data={
         "from":    f"Immobilien Anfragen <anfragen@{MAILGUN_DOMAIN}>",
-        "to":      ["deine@email.com"],  # <-- Deine eigene E-Mail
+        "to":      ["nioburing@gmail.com"],  # <-- Deine eigene E-Mail
         "subject": "Test – Neue Domain funktioniert",
         "text":    "Dieser Test zeigt dass die eigene Domain korrekt eingerichtet ist."
     }

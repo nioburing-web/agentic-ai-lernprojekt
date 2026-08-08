@@ -23,3 +23,12 @@ agent_log.txt
 # Node.js
 node_modules/
 buchhalter-agent/node_modules/
+
+# LinkedIn Session-State (lokaler Repro-Test, niemals committen)
+.li-state.json
+
+# LinkedIn OAuth Token (lokal, niemals committen)
+.linkedin-token.json
+
+# Playwright-MCP Debug-Artefakte (ephemer, nie committen)
+.playwright-mcp/

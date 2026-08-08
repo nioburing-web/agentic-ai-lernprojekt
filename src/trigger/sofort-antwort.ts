@@ -24,19 +24,6 @@ type Antwort = {
 
 const GUELTIGE_KATEGORIEN: Kategorie[] = ["BUCHHALTUNG", "BERATUNG", "TERMIN", "SONSTIGES"];
 
-const EMAIL_SYSTEM_PROMPT = `Du bist ein professioneller E-Mail-Assistent für NIO Automation.
-Erstelle eine professionelle E-Mail-Antwort auf eine Kontaktformular-Anfrage.
-
-Halte dich strikt an folgende Regeln:
-- Beginne immer mit: "Sehr geehrte/r [Name],"
-- Maximal 4 Sätze Haupttext
-- Immer einen klaren Call-to-Action am Ende
-- Ton: professionell aber persönlich
-- VERBOTEN: "Sehr geehrte Damen und Herren"
-- VERBOTEN: Mehr als eine Frage in der E-Mail
-- KEINE Signatur im generierten Text (Signatur wird separat angehängt)
-
-Antworte ausschließlich mit dem E-Mail-Text, ohne Betreff-Zeile oder Signatur.`;
 
 // ─── Hilfsfunktion: Datum in Europe/Berlin formatieren ───────────────────────
 
@@ -101,40 +88,54 @@ async function analysiereAnfrage(payload: Payload): Promise<Kategorie> {
 
 // ─── Funktion 2: Antwort generieren ──────────────────────────────────────────
 
-async function generiereAntwort(name: string, message: string, kategorie: Kategorie): Promise<Antwort> {
+async function generiereAntwort(
+  name: string,
+  message: string,
+  company: string | undefined,
+  _kategorie: Kategorie
+): Promise<Antwort> {
+  const betreff = `Danke für Ihre Nachricht, ${name}`;
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const betreff = "Ihre Anfrage bei NIO Automation – wir melden uns";
+  const kontext =
+    `Name: ${name}\n` +
+    (company ? `Firma: ${company}\n` : "") +
+    `Nachricht: ${message}`;
+
+  const systemPrompt =
+    "Du schreibst eine kurze E-Mail-Antwort auf eine Kontaktformular-Anfrage für NIO Automation.\n\n" +
+    "Regeln:\n" +
+    "1. Satz 1: Beginne mit \"Guten Tag [Name],\" und übernimm das konkreteste Keyword der Nachricht WÖRTLICH in einem Satz.\n" +
+    "   Beispiel Nachricht: 'Ich brauche Hilfe mit meiner Buchhaltung'\n" +
+    "   → Richtig: \"Guten Tag Max, vielen Dank für Ihre Anfrage bezüglich Ihrer Buchhaltung.\"\n" +
+    "   → FALSCH: \"Guten Tag Max, ich verstehe dass Sie an einem Agenten interessiert sind der Probleme löst.\"\n" +
+    "2. Satz 2 (letzter Satz): \"Ich melde mich innerhalb von 24 Stunden persönlich bei Ihnen.\"\n" +
+    "3. Genau 2 Sätze – nicht mehr, nicht weniger\n" +
+    "4. Keine Signatur, keine Betreffzeile, kein zusätzlicher Text";
 
   try {
-    const userPrompt =
-      `Schreibe eine Antwort auf folgende Kontaktformular-Anfrage:\n\n` +
-      `Name: ${name}\n` +
-      `Kategorie: ${kategorie}\n` +
-      `Nachricht:\n${message}\n\n` +
-      `Erstelle einen professionellen E-Mail-Text gemäß den Qualitäts-Regeln.`;
-
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: EMAIL_SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Schreibe die Antwort für:\n\n${kontext}` },
       ],
-      max_tokens: 300,
-      temperature: 0.7,
+      max_tokens: 100,
+      temperature: 0.3,
     });
 
-    const emailText = response.choices[0].message.content?.trim() ?? "";
-    logger.log("Schritt 2 abgeschlossen", { betreff });
+    const emailText =
+      response.choices[0].message.content?.trim() ??
+      `Guten Tag ${name},\n\nIch melde mich innerhalb von 24 Stunden persönlich bei Ihnen.`;
+
+    logger.log("Schritt 2 abgeschlossen", { betreff, personalisiert: true });
     return { betreff, emailText };
   } catch (e) {
-    logger.error("Fehler bei E-Mail-Generierung – Fallback-Text", { error: e });
-    const emailText =
-      `Sehr geehrte/r ${name},\n\n` +
-      `vielen Dank für Ihre Anfrage bei NIO Automation. ` +
-      `Wir haben Ihre Nachricht erhalten und melden uns schnellstmöglich bei Ihnen. ` +
-      `Bei dringenden Fragen erreichen Sie uns jederzeit direkt per E-Mail.`;
-    return { betreff, emailText };
+    logger.error("Fehler bei Antwort-Generierung – Fallback", { error: e });
+    return {
+      betreff,
+      emailText: `Guten Tag ${name},\n\nIch melde mich innerhalb von 24 Stunden persönlich bei Ihnen.`,
+    };
   }
 }
 
@@ -291,11 +292,11 @@ export const sofortAntwortTask = task({
 
     // Schritt 2: Antwort generieren
     let antwort: Antwort = {
-      betreff: "Ihre Anfrage bei NIO Automation – wir melden uns",
-      emailText: `Sehr geehrte/r ${payload.name},\n\nvielen Dank für Ihre Anfrage. Wir melden uns bald.`,
+      betreff: `Danke für Ihre Nachricht, ${payload.name}`,
+      emailText: `Guten Tag ${payload.name},\n\nIch melde mich innerhalb von 24 Stunden persönlich bei Ihnen.`,
     };
     try {
-      antwort = await generiereAntwort(payload.name, payload.message, kategorie);
+      antwort = await generiereAntwort(payload.name, payload.message, payload.company, kategorie);
     } catch (e) {
       logger.error("Schritt 2 fehlgeschlagen", { error: e });
     }

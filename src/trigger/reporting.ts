@@ -6,11 +6,13 @@ import { GoogleAuth } from "google-auth-library";
 // ─── Typen ────────────────────────────────────────────────────────────────────
 
 type OutreachStats = {
-  kontaktiert: number;
-  interessiert: number;
-  abgelehnt: number;
-  conversionRate: number;
+  gesendet: number;
+  geoeffnet: number;
+  geantwortet: number;
+  positiv: number;
   offeneLeads: string[];
+  interessiertFirmen: string[];
+  rueckfrageFirmen: string[];
 };
 
 type SofortAntwortStats = {
@@ -24,7 +26,13 @@ type SofortAntwortStats = {
 // ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
 
 function gestrigDatumBerlin(): string {
-  const gestern = new Date(Date.now() - 86_400_000);
+  const heute = new Date();
+  const wochentag = heute.getDay(); // 0=Sonntag, 1=Montag
+
+  // Montag → Outreach lief Freitag, also 3 Tage zurück
+  const tageZurueck = wochentag === 1 ? 3 : 1;
+  const gestern = new Date(heute.getTime() - tageZurueck * 86_400_000);
+
   const parts = new Intl.DateTimeFormat("de-DE", {
     timeZone: "Europe/Berlin",
     day: "2-digit",
@@ -71,16 +79,51 @@ async function getTabName(sheets: ReturnType<typeof googleSheets>, sheetId: stri
   return gefunden?.properties?.title ?? alle[0]?.properties?.title ?? "Sheet1";
 }
 
-// ─── Schritt 1: Buchhalter-Outreach lesen ─────────────────────────────────────
-// Spalten: A=Firma, B=Stadt, C=Status, D=Datum (DD.MM.YYYY), E=Uhrzeit, F=Betreff
+// ─── Brevo Opens (transaktional) ──────────────────────────────────────────────
+// Opens werden NICHT ins Sheet geschrieben – einzige Quelle ist die Brevo Events
+// API (morgen-versand sendet mit trackOpens). Liefert Set aller Öffner-Adressen
+// der letzten 7 Tage (lowercase).
+
+async function getBrevoOpens(): Promise<Set<string>> {
+  const opened = new Set<string>();
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    logger.warn("BREVO_API_KEY nicht gesetzt – Opens übersprungen");
+    return opened;
+  }
+
+  try {
+    const response = await axios.get("https://api.brevo.com/v3/smtp/statistics/events", {
+      headers: { "api-key": apiKey, accept: "application/json" },
+      params: { event: "opened", days: 7, limit: 2500, sort: "desc" },
+    });
+    const events = (response.data?.events ?? []) as Array<{ email?: string }>;
+    for (const ev of events) {
+      if (ev.email) opened.add(ev.email.toLowerCase().trim());
+    }
+    logger.log("Brevo Opens geladen", { uniqueOpener: opened.size, events: events.length });
+  } catch (e) {
+    logger.error("Brevo Opens konnten nicht geladen werden", { error: String(e) });
+  }
+  return opened;
+}
+
+// ─── Schritt 1: Outreach Queue lesen ──────────────────────────────────────────
+// Spalten: A=Typ, B=Name, C=Stadt, D=Kontakt(Email), E=Entwurf, F=Status,
+//          G=Erstellt, H=Gesendet (DD.MM.YYYY), I=Betreff, J=Fehler
+// Status-Werte: DRAFT, GESENDET, FEHLER, INTERESSIERT, RÜCKFRAGE, ABGELEHNT, ABWESEND
+
+const ANTWORT_STATUS = ["INTERESSIERT", "RÜCKFRAGE", "ABGELEHNT", "ABWESEND"];
 
 async function leseOutreachDaten(gestern: string): Promise<OutreachStats> {
   const leer: OutreachStats = {
-    kontaktiert: 0,
-    interessiert: 0,
-    abgelehnt: 0,
-    conversionRate: 0,
+    gesendet: 0,
+    geoeffnet: 0,
+    geantwortet: 0,
+    positiv: 0,
     offeneLeads: [],
+    interessiertFirmen: [],
+    rueckfrageFirmen: [],
   };
 
   const sheetId = process.env.GOOGLE_SHEET_ID;
@@ -90,48 +133,56 @@ async function leseOutreachDaten(gestern: string): Promise<OutreachStats> {
   }
 
   const sheets = getSheetsClient();
-  const tabName = await getTabName(sheets, sheetId, "Buchhalter Outreach");
+  const tabName = await getTabName(sheets, sheetId, "Outreach Queue");
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `'${tabName}'!A:F`,
+    range: `'${tabName}'!A:J`,
   });
 
   const rows = (response.data.values ?? []).slice(1); // Header überspringen
-  logger.log("Outreach Sheet geladen", { zeilen: rows.length, gestern, tabName });
+  const opened = await getBrevoOpens();
+  logger.log("Outreach Queue geladen", { zeilen: rows.length, gestern, tabName, opens: opened.size });
 
-  let kontaktiert = 0;
-  let interessiert = 0;
-  let abgelehnt = 0;
+  let gesendet = 0;
+  let geoeffnet = 0;
+  let geantwortet = 0;
+  let positiv = 0;
   const offeneLeads: string[] = [];
+  const interessiertFirmen: string[] = [];
+  const rueckfrageFirmen: string[] = [];
 
   for (const row of rows) {
-    const firma = (row[0] ?? "").trim();
-    const status = (row[2] ?? "").trim().toUpperCase();
-    const datum = normalizeDatum((row[3] ?? "").trim());
+    const typ = (row[0] ?? "").trim().toUpperCase();
+    const name = (row[1] ?? "").trim();
+    const kontakt = (row[3] ?? "").trim().toLowerCase();
+    const status = (row[5] ?? "").trim().toUpperCase();
+    const gesendetDatum = normalizeDatum((row[7] ?? "").trim());
 
-    if (!datum) continue;
+    if (typ !== "EMAIL") continue; // LinkedIn läuft separat
 
-    // Zähler für gestern
-    if (datum === gestern) {
-      if (status === "KONTAKTIERT") kontaktiert++;
-      else if (status === "INTERESSIERT") interessiert++;
-      else if (status === "ABGELEHNT") abgelehnt++;
+    // Gestrige Kennzahlen: gestern versendete Zeilen (nicht DRAFT/FEHLER)
+    if (gesendetDatum === gestern && status !== "DRAFT" && status !== "FEHLER") {
+      gesendet++;
+      if (kontakt && opened.has(kontakt)) geoeffnet++;
+      if (ANTWORT_STATUS.includes(status)) geantwortet++;
+      if (status === "INTERESSIERT" || status === "RÜCKFRAGE") positiv++;
     }
 
-    // Offene Leads: kein Status oder KONTAKTIERT, 3+ Tage alt
-    const tageAlt = tageDifferenz(datum);
-    if (tageAlt >= 3 && (status === "" || status === "KONTAKTIERT") && firma) {
-      offeneLeads.push(firma);
+    // Historische HANDLUNGSBEDARF-Listen (alle Zeilen ohne Datumsfilter)
+    if (status === "INTERESSIERT" && name) interessiertFirmen.push(name);
+    if (status === "RÜCKFRAGE" && name) rueckfrageFirmen.push(name);
+
+    // Offene Leads: gesendet, noch keine Antwort, 3+ Tage alt
+    if (gesendetDatum && status === "GESENDET") {
+      const tageAlt = tageDifferenz(gesendetDatum);
+      if (tageAlt >= 3 && name) offeneLeads.push(name);
     }
   }
 
-  const conversionRate =
-    kontaktiert > 0 ? Math.round((interessiert / kontaktiert) * 1000) / 10 : 0;
+  logger.log("Schritt 1 abgeschlossen", { gesendet, geoeffnet, geantwortet, positiv, offeneLeads: offeneLeads.length });
 
-  logger.log("Schritt 1 abgeschlossen", { kontaktiert, interessiert, abgelehnt, offeneLeads: offeneLeads.length });
-
-  return { kontaktiert, interessiert, abgelehnt, conversionRate, offeneLeads };
+  return { gesendet, geoeffnet, geantwortet, positiv, offeneLeads, interessiertFirmen, rueckfrageFirmen };
 }
 
 // ─── Schritt 2: Sofort-Antwort lesen ─────────────────────────────────────────
@@ -209,27 +260,45 @@ function generiereReport(
 ): { betreff: string; reportText: string } {
   const betreff = `NIO Automation Report – ${gestern}`;
 
-  const offeneLeadsText =
-    outreach.offeneLeads.length > 0
-      ? outreach.offeneLeads.map((f) => `- ${f}`).join("\n")
-      : "- Keine offenen Leads";
+  const openRate = outreach.gesendet > 0
+    ? Math.round((outreach.geoeffnet / outreach.gesendet) * 1000) / 10 : 0;
+  const antwortRate = outreach.gesendet > 0
+    ? Math.round((outreach.geantwortet / outreach.gesendet) * 1000) / 10 : 0;
+  const positiveRate = outreach.gesendet > 0
+    ? Math.round((outreach.positiv / outreach.gesendet) * 1000) / 10 : 0;
+
+  const interessiertText = outreach.interessiertFirmen.length > 0
+    ? outreach.interessiertFirmen.join(", ") : "Keine";
+  const rueckfrageText = outreach.rueckfrageFirmen.length > 0
+    ? outreach.rueckfrageFirmen.join(", ") : "Keine";
+  const offeneText = outreach.offeneLeads.length > 0
+    ? outreach.offeneLeads.join(", ") : "Keine";
 
   const reportText =
-    `Buchhalter-Outreach (${gestern}):\n` +
-    `- E-Mails gesendet: ${outreach.kontaktiert}\n` +
-    `- Interessenten: ${outreach.interessiert} (${outreach.conversionRate}%)\n` +
-    `- Abgelehnt: ${outreach.abgelehnt}\n` +
+    `=== NIO Automation Report – ${gestern} ===\n` +
     `\n` +
-    `Sofort-Antwort (${gestern}):\n` +
-    `- Anfragen: ${sofort.anfragen}\n` +
-    `- Beantwortet: ${sofort.beantwortet}\n` +
-    `- Ø Reaktionszeit: ${sofort.avgReaktionszeitMin} Minuten\n` +
-    `- Schnellste Antwort: ${sofort.schnellsteMin} Minuten\n` +
+    `BUCHHALTER-OUTREACH:\n` +
+    `Gesendet:     ${outreach.gesendet} E-Mails\n` +
+    `Geöffnet:     ${outreach.geoeffnet} (${openRate}% Open Rate)\n` +
+    `Geantwortet:  ${outreach.geantwortet} (${antwortRate}% Antwort Rate)\n` +
+    `Positiv:      ${outreach.positiv} (${positiveRate}% Positive Rate)\n` +
     `\n` +
-    `Handlungsbedarf (offene Leads 3+ Tage):\n` +
-    offeneLeadsText;
+    `SOFORT-ANTWORT:\n` +
+    `Anfragen:          ${sofort.anfragen}\n` +
+    `Beantwortet:       ${sofort.beantwortet}\n` +
+    `Ø Reaktionszeit:   ${sofort.avgReaktionszeitMin} Minuten\n` +
+    `\n` +
+    `HANDLUNGSBEDARF:\n` +
+    `▸ INTERESSIERT: ${interessiertText}\n` +
+    `▸ RÜCKFRAGE:    ${rueckfrageText}\n` +
+    `▸ OFFEN 3+ Tage:${offeneText}\n` +
+    `\n` +
+    `INTERPRETATION:\n` +
+    `Open Rate < 20%    → Betreff verbessern\n` +
+    `Antwort Rate < 3%  → Text verbessern\n` +
+    `Positive Rate < 1% → Zielgruppe prüfen`;
 
-  logger.log("Schritt 3 abgeschlossen", { betreff });
+  logger.log("Schritt 3 abgeschlossen", { betreff, openRate, antwortRate, positiveRate });
   return { betreff, reportText };
 }
 
@@ -274,10 +343,11 @@ async function sendeReport(betreff: string, reportText: string): Promise<boolean
 
 export const reportingAgent = schedules.task({
   id: "reporting-agent",
-  cron: {
-    pattern: "0 9 * * 1-5",
-    timezone: "Europe/Berlin",
-  },
+  // Cron deaktiviert auf Nios Wunsch (2026-07-08) — Performance-Report läuft jetzt via Terminal. Reaktivieren: cron-Block wieder einkommentieren.
+  // cron: {
+  //   pattern: "0 9 * * 1-5",
+  //   timezone: "Europe/Berlin",
+  // },
   maxDuration: 120,
   run: async () => {
     logger.log("Reporting Agent gestartet");
@@ -285,7 +355,8 @@ export const reportingAgent = schedules.task({
 
     // Schritt 1: Buchhalter-Outreach Daten
     let outreach: OutreachStats = {
-      kontaktiert: 0, interessiert: 0, abgelehnt: 0, conversionRate: 0, offeneLeads: [],
+      gesendet: 0, geoeffnet: 0, geantwortet: 0, positiv: 0,
+      offeneLeads: [], interessiertFirmen: [], rueckfrageFirmen: [],
     };
     try {
       outreach = await leseOutreachDaten(gestern);

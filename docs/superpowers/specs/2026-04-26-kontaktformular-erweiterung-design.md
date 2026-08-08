@@ -156,3 +156,4 @@ Keine neuen Env-Vars nötig.
 - Nicht alle Formulare haben erkennbare Felder-Namen — unbekannte Formulare werden übersprungen
 - CAPTCHAs werden nicht gelöst
 - Formular-Erfolgserkennung ist heuristisch (URL-Wechsel oder Text-Match)
+

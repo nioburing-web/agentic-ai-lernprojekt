@@ -101,17 +101,17 @@ async function stelleHeaderSicher(
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Buchhalter Outreach!A1:F1",
+    range: "Buchhalter Outreach!A1:G1",
   });
   const ersteZeile = response.data.values?.[0];
   if (!ersteZeile || ersteZeile[0] !== "Firma") {
     console.log("Header-Zeile wird angelegt...");
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
-      range: "Buchhalter Outreach!A1:F1",
+      range: "Buchhalter Outreach!A1:G1",
       valueInputOption: "RAW",
       requestBody: {
-        values: [["Firma", "Stadt", "Status", "Datum", "Uhrzeit", "Betreff"]],
+        values: [["Firma", "Stadt", "Status", "Datum", "Uhrzeit", "Betreff", "Geoeffnet"]],
       },
     });
   }
@@ -275,210 +275,46 @@ export async function findeEmailAufWebsite(
     if (pruefEmail(email, false)) return { email, kontaktformularUrl: null };
   }
 
-  // Kontaktformular suchen wenn keine E-Mail gefunden
-  const formularSeiten = [
-    `${baseUrl}/kontakt`,
-    `${baseUrl}/contact`,
-    baseUrl,
-  ];
-
-  for (const seite of formularSeiten) {
-    let inhalt: string;
-    try {
-      const res = await fetchMitTimeout(seite, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        },
-      }, 5000);
-      if (!res.ok) continue;
-      inhalt = await res.text();
-    } catch {
-      continue;
-    }
-
-    // Prüfe ob Seite ein Formular mit Nachrichtenfeld enthält
-    const hatFormular =
-      inhalt.includes("<form") &&
-      (inhalt.toLowerCase().includes("textarea") ||
-        inhalt.toLowerCase().includes('type="email"') ||
-        inhalt.toLowerCase().includes('name="nachricht"') ||
-        inhalt.toLowerCase().includes('name="message"'));
-
-    if (hatFormular) {
-      console.log(`Kontaktformular gefunden auf: ${seite}`);
-      return { email: null, kontaktformularUrl: seite };
-    }
-  }
-
   return { email: null, kontaktformularUrl: null };
-}
-
-async function fuellKontaktformular(
-  firma: string,
-  kontaktformularUrl: string,
-  betreff: string,
-  emailInhalt: string
-): Promise<boolean> {
-  console.log(`Fülle Kontaktformular aus für: ${firma} → ${kontaktformularUrl}`);
-
-  const absenderName = process.env.ABSENDER_NAME ?? "NIO Automation";
-  const absenderEmail = process.env.REPLY_TO_EMAIL ?? process.env.ABSENDER_EMAIL;
-  if (!absenderEmail) {
-    console.error("REPLY_TO_EMAIL und ABSENDER_EMAIL fehlen – Kontaktformular übersprungen");
-    return false;
-  }
-
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
-
-  try {
-    const page = await browser.newPage();
-    await page.goto(kontaktformularUrl, { timeout: 30000, waitUntil: "domcontentloaded" });
-
-    // Cookie-Consent-Modal schließen (blockiert sonst Klicks)
-    const cookieSelectors = [
-      "button[id*='accept' i]", "button[class*='accept' i]", "button[class*='agree' i]",
-      "button[class*='zustimm' i]", "button[class*='akzept' i]",
-      ".ccm-widget .ccm--btn-accept", ".ccm-modal button", "[class*='cookie'] button",
-      "button:has-text('Akzeptieren')", "button:has-text('Alle akzeptieren')",
-      "button:has-text('Zustimmen')", "button:has-text('Accept')",
-    ];
-    for (const sel of cookieSelectors) {
-      const btn = page.locator(sel).first();
-      if (await btn.count() > 0) {
-        try { await btn.click({ timeout: 2000 }); } catch {}
-        break;
-      }
-    }
-
-    // CAPTCHA-Erkennung
-    const hatCaptcha = await page.locator(".g-recaptcha, [class*='captcha'], iframe[src*='recaptcha']").count();
-    if (hatCaptcha > 0) {
-      console.log(`CAPTCHA erkannt – überspringe: ${firma}`);
-      return false;
-    }
-
-    // Felder ausfüllen
-    const nameSelector = "input[name*='name' i]:not([type='hidden']), input[placeholder*='Name' i]:not([type='hidden']), input[id*='name' i]:not([type='hidden'])";
-    const emailSelector = "input[type='email'], input[name*='email' i]:not([type='hidden']), input[name*='mail' i]:not([type='hidden'])";
-    const betreffSelector = "input[name*='subject' i]:not([type='hidden']), input[name*='betreff' i]:not([type='hidden']), input[placeholder*='Betreff' i]:not([type='hidden'])";
-    const nachrichtSelector = "textarea, input[name*='message' i]:not([type='hidden']), input[name*='nachricht' i]:not([type='hidden'])";
-    const submitSelector = "button[type='submit'], input[type='submit'], button:has-text('Senden'), button:has-text('Absenden')";
-
-    const nameFeld = page.locator(nameSelector).first();
-    if (await nameFeld.count() > 0) await nameFeld.fill(absenderName);
-
-    const emailFeld = page.locator(emailSelector).first();
-    if (await emailFeld.count() > 0) await emailFeld.fill(absenderEmail);
-
-    const betreffFeld = page.locator(betreffSelector).first();
-    if (await betreffFeld.count() > 0) await betreffFeld.fill(betreff);
-
-    const nachrichtFeld = page.locator(nachrichtSelector).first();
-    if (await nachrichtFeld.count() === 0) {
-      console.log(`Kein Nachrichtenfeld gefunden – überspringe: ${firma}`);
-      return false;
-    }
-    await nachrichtFeld.fill(emailInhalt);
-
-    const submitButton = page.locator(submitSelector).first();
-    if (await submitButton.count() === 0) {
-      console.log(`Kein Submit-Button gefunden – überspringe: ${firma}`);
-      return false;
-    }
-
-    // TEST_MODUS: Formular ausgefüllt aber nicht abgesendet + Screenshot
-    if (process.env.TEST_MODUS === "True") {
-      const { mkdirSync } = await import("fs");
-      mkdirSync("screenshots", { recursive: true });
-      const safeName = firma.replace(/[^a-zA-Z0-9_-]/g, "_");
-      const screenshotPath = `screenshots/test_${safeName}.png`;
-      await page.screenshot({ path: screenshotPath, fullPage: false });
-      console.log(`TEST MODUS – Formular ausgefüllt aber nicht abgesendet. Screenshot: ${screenshotPath}`);
-      return true;
-    }
-
-    const urlVorSubmit = page.url();
-    // Erst normaler Klick, falls Overlay noch da: per JS erzwingen
-    try {
-      await submitButton.click({ timeout: 5000 });
-    } catch {
-      await submitButton.evaluate((el: HTMLElement) => el.click());
-    }
-
-    // Erfolgsprüfung: URL-Wechsel oder Erfolgs-Text
-    try {
-      await page.waitForFunction(
-        (vorher: string) => {
-          const neueUrl = window.location.href !== vorher;
-          const erfolgsText = ["vielen dank", "wurde gesendet", "erfolgreich", "thank you", "message sent"]
-            .some(t => document.body.innerText.toLowerCase().includes(t));
-          return neueUrl || erfolgsText;
-        },
-        urlVorSubmit,
-        { timeout: 5000 }
-      );
-      console.log(`Kontaktformular erfolgreich ausgefüllt: ${firma}`);
-      return true;
-    } catch {
-      console.log(`Keine Erfolgsbestätigung erhalten – möglicherweise trotzdem gesendet: ${firma}`);
-      return true; // Im Zweifel als gesendet werten
-    }
-  } catch (err) {
-    console.error(`Playwright Fehler für ${firma}:`, err);
-    return false;
-  } finally {
-    await browser.close();
-  }
 }
 
 async function generiereEmail(
   firma: string,
   stadt: string,
-  viaKontaktformular: boolean
 ): Promise<string> {
-  console.log(`Generiere E-Mail für: ${firma} (via Kontaktformular: ${viaKontaktformular})`);
+  console.log(`Generiere E-Mail für: ${firma}`);
   const openai = getOpenAI();
-
-  const extraSatz = viaKontaktformular
-    ? `\n\nAbsatz 4 – Optionaler Zusatz (NUR bei Kontaktformular anhängen):\nÜbrigens – falls Sie merken dass Sie selbst länger brauchen um auf Anfragen zu antworten: genau dafür habe ich ebenfalls eine Lösung.`
-    : "";
+  const calendlyLink = process.env.CALENDLY_LINK ?? "https://calendly.com/nioburing/30min";
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.8,
-    max_tokens: 450,
+    temperature: 0.9,
+    max_tokens: 300,
     messages: [
       {
+        role: "system",
+        content: `Du bist Nio – ein junger Unternehmer aus Hamburg. Du schreibst kurze persönliche Kaltakquise-E-Mails an Buchhalter und Steuerberater – wie ein echter Mensch, nicht wie ein Verkäufer.`,
+      },
+      {
         role: "user",
-        content: `Schreibe eine kurze E-Mail an die Buchhalter-/Steuerberaterkanzlei ${firma} in ${stadt}.
+        content: `Schreibe eine kurze E-Mail an die Kanzlei ${firma} in ${stadt}.
 
-Beginne mit dieser Anrede (zählt nicht zu den Sätzen):
-Guten Tag ${firma} Team,
+Zeile 1:
+Guten Tag,
 
-Schreibe danach genau drei Absätze mit dieser festen Satz-Verteilung:
+Absatz 1 (2 Sätze):
+Eine ganz konkrete Beobachtung über den Buchhalter-Alltag die jeder Buchhalter sofort wiedererkennt. Nicht abstrakt. Keine Formulierungen wie "beeindruckend", "Blick von außen" oder "hektisch". Klingt wie ein Gedanke den jemand laut ausspricht der die Branche wirklich kennt. Variiere bei jedem Run.
 
-Absatz 1 – 2 Sätze – Das echte Problem:
-Satz 1: Beobachte ehrlich und locker, dass Mandantengewinnung Zeit kostet.
-Satz 2: Zeige Verständnis – Buchhalter und Steuerberater haben diese Zeit kaum, weil sie mit bestehenden Mandanten ausgelastet sind.
+Absatz 2 (1 Satz):
+Erkläre direkt was du gebaut hast: einen KI-Agenten der täglich automatisch neue Mandantenanfragen für Buchhaltungskanzleien generiert – ohne dass die Kanzlei selbst akquirieren muss. Ich-Perspektive. Konkret, kein Marketingsprech.
 
-Absatz 2 – 2 Sätze – Was ich mache:
-Schreibe aus der Ich-Perspektive einer einzelnen Person (kein Firmenname).
-Satz 3: Erkläre kurz, wie du Kanzleien hilfst neue Mandanten zu gewinnen ohne dass sie selbst Zeit investieren müssen.
-Satz 4: Klingt wie ein Freund der etwas empfiehlt – kein Versprechen, keine Zahlen.
+Absatz 3 (1 Satz):
+Weiche Einladung zu einem 15-Minuten-Gespräch mit diesem Buchungslink: ${calendlyLink} – kein Druck, nur Neugier wecken.
 
-Absatz 3 – 1 Satz – Weicher Call to Action:
-Satz 5: Lade zu einem 15-Minuten-Gespräch ein. Kein Druck. Sinngemäß: Ich zeige Ihnen live wie es funktioniert – Sie entscheiden dann selbst ob es passt.${extraSatz}
-
-Regeln:
-- Exakt 5 Sätze in den ersten drei Absätzen (2 + 2 + 1), nicht mehr, nicht weniger
-- Durchgehend Ich-Perspektive – kein Firmenname im Text
-- Locker und menschlich – wie eine einzelne Person schreibt, nicht wie Marketing
-- Keine Anführungszeichen im Text
-- Keine Aufzählungszeichen oder ungewöhnlichen Sonderzeichen
-- Kein Betreff, keine Verabschiedung, keine Signatur
-- Sprache: Deutsch`,
+Keine Signatur – kommt separat.
+Keine Anführungszeichen.
+Keine Sonderzeichen.
+Jede E-Mail klingt anders.`,
       },
     ],
   });
@@ -518,6 +354,8 @@ async function sendeEmail(
     subject: betreff,
     textContent: vollstaendigerInhalt,
     type: "transactional",
+    trackOpens: 1,
+    trackClicks: 1,
   };
 
   console.log(`Sende E-Mail via Brevo für: ${firma} → ${empfaenger}`);
@@ -558,161 +396,12 @@ async function trackingEintrag(
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: "Buchhalter Outreach!A:F",
+    range: "Buchhalter Outreach!A:G",
     valueInputOption: "RAW",
     requestBody: {
-      values: [[firma, stadt, "KONTAKTIERT", datum, uhrzeit, betreff]],
+      values: [[firma, stadt, "KONTAKTIERT", datum, uhrzeit, betreff, "NEIN"]],
     },
   });
 }
 
-export const buchhalterOutreach = schedules.task({
-  id: "buchhalter-outreach",
-  cron: "0 6 * * 1-5", // Mo–Fr 08:00 CEST (= 06:00 UTC)
-  machine: "small-1x",
-  maxDuration: 300,
-  run: async () => {
-    console.log("=== Buchhalter Outreach Agent gestartet ===");
-
-    const SUCHBEGRIFFE = ["Buchhalter", "Steuerberater", "Buchhaltung", "Kanzlei"];
-    const zielbranche = process.env.ZIELBRANCHE
-      ?? SUCHBEGRIFFE[Math.floor(Math.random() * SUCHBEGRIFFE.length)]!;
-    const zielstadt = process.env.ZIELSTADT ?? "Hamburg";
-    const maxEmails = parseInt(process.env.MAX_EMAILS_PRO_TAG ?? "10", 10);
-
-    console.log(`Konfiguration: ${zielbranche} in ${zielstadt}, max ${maxEmails} E-Mails`);
-
-    // Schritt 1: Google Maps
-    let firmen: Array<{ name: string; adresse: string; placeId: string }>;
-    try {
-      firmen = await suchePerGoogleMaps(zielbranche, zielstadt);
-    } catch (err) {
-      console.error("Google Maps Fehler:", err);
-      return;
-    }
-
-    if (firmen.length === 0) {
-      console.log("Keine Firmen gefunden. Stoppe.");
-      return;
-    }
-
-    // Schritt 2: Google Sheets laden
-    let sheets: ReturnType<typeof googleSheets>;
-    let sheetId: string;
-    try {
-      ({ sheets, sheetId } = await getSheet());
-      await stelleHeaderSicher(sheets, sheetId);
-    } catch (err) {
-      console.error("Google Sheets Init Fehler:", err);
-      return;
-    }
-
-    let { firmen: vorhandene, heuteKontaktiert } = await ladeVorhandeneEintraege(sheets, sheetId);
-    const neueKandidaten = firmen.filter(f => !vorhandene.has(f.name.toLowerCase().trim())).length;
-    console.log(`Bereits heute kontaktiert: ${heuteKontaktiert}/${maxEmails}`);
-    console.log(`Google Maps Ergebnisse: ${firmen.length} gesamt, ${vorhandene.size} bereits im Sheet, ${neueKandidaten} neue Kandidaten`);
-
-    if (heuteKontaktiert >= maxEmails) {
-      console.log("Tageslimit erreicht. Stoppe.");
-      return;
-    }
-
-    let skipBereitsKontaktiert = 0;
-    let skipKeineWebsite = 0;
-    let skipKeineEmail = 0;
-
-    // Loop über gefundene Firmen
-    for (const firma of firmen) {
-      if (heuteKontaktiert >= maxEmails) {
-        console.log(`Tageslimit erreicht bei ${heuteKontaktiert}/${maxEmails}. Stoppe.`);
-        break;
-      }
-
-      const firmaKey = firma.name.toLowerCase().trim();
-      if (vorhandene.has(firmaKey)) {
-        skipBereitsKontaktiert++;
-        console.log(`Überspringe (bereits im Sheet): ${firma.name}`);
-        continue;
-      }
-
-      // Schritt 1b: Website via Place Details holen (Text Search gibt kein website-Feld)
-      const website = await holeWebsiteVonPlaceDetails(firma.placeId);
-      if (!website) {
-        skipKeineWebsite++;
-        console.log(`Keine Website gefunden – überspringe: ${firma.name}`);
-        continue;
-      }
-
-      let sucheErgebnis: { email: string | null; kontaktformularUrl: string | null };
-      try {
-        sucheErgebnis = await findeEmailAufWebsite(website);
-      } catch (err) {
-        console.error(`E-Mail/Formular-Suche Fehler für ${firma.name}:`, err);
-        continue;
-      }
-
-      const { email: firmaEmail, kontaktformularUrl } = sucheErgebnis;
-      const viaKontaktformular = !firmaEmail && !!kontaktformularUrl;
-
-      if (!firmaEmail && !kontaktformularUrl) {
-        skipKeineEmail++;
-        console.log(`Keine E-Mail und kein Kontaktformular – überspringe: ${firma.name} (${website})`);
-        continue;
-      }
-
-      if (firmaEmail) {
-        console.log(`E-Mail gefunden: ${firmaEmail} für ${firma.name}`);
-      } else {
-        console.log(`Kontaktformular gefunden: ${kontaktformularUrl} für ${firma.name}`);
-      }
-
-      // Schritt 3: E-Mail-Inhalt generieren
-      const betreff = `Neue Mandanten für ${firma.name} – ohne eigenen Aufwand`;
-      let emailInhalt: string;
-      try {
-        emailInhalt = await generiereEmail(firma.name, zielstadt, viaKontaktformular);
-      } catch (err) {
-        console.error(`OpenAI Fehler für ${firma.name}:`, err);
-        continue;
-      }
-
-      // Schritt 4: Senden (E-Mail oder Kontaktformular)
-      let gesendet = false;
-      try {
-        if (viaKontaktformular) {
-          gesendet = await fuellKontaktformular(firma.name, kontaktformularUrl!, betreff, emailInhalt);
-          if (!gesendet) {
-            console.log(`Kontaktformular übersprungen für ${firma.name} (CAPTCHA, kein Formular oder Overlay)`);
-            continue;
-          }
-          console.log(`Kontaktformular ausgefüllt: ${firma.name}`);
-        } else {
-          gesendet = await sendeEmail(firma.name, betreff, emailInhalt, firmaEmail!);
-          if (!gesendet) {
-            console.error(`Brevo Fehler für ${firma.name}: E-Mail nicht gesendet`);
-            continue;
-          }
-          console.log(`E-Mail gesendet: ${firma.name}`);
-        }
-      } catch (err) {
-        console.error(`Sende-Fehler für ${firma.name}:`, err);
-        continue;
-      }
-
-      // 5 Sekunden Pause zwischen Versand (Brevo Rate-Limit)
-      await wait.for({ seconds: 5 });
-
-      // Schritt 5: Tracking
-      try {
-        await trackingEintrag(sheets, sheetId, firma.name, zielstadt, betreff);
-        vorhandene.add(firmaKey);
-        heuteKontaktiert++;
-      } catch (err) {
-        console.error(`Sheets Tracking Fehler für ${firma.name}:`, err);
-      }
-    }
-
-    console.log(`=== Fertig. Heute kontaktiert: ${heuteKontaktiert}/${maxEmails} ===`);
-    console.log(`Skip-Gründe: ${skipBereitsKontaktiert}x bereits im Sheet, ${skipKeineWebsite}x keine Website, ${skipKeineEmail}x keine E-Mail`);
-  },
-});
+// Task deaktiviert – Logik übernommen von nacht-recherche + morgen-versand

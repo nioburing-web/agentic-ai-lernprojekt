@@ -17,6 +17,17 @@
 - Maximal 20 Ergebnisse pro Anfrage
 - Rückgabe: name, formatted_address
 
+## Schritt 1b: E-Mail-Adresse der Firma finden
+- Tool: tools/find_email.py
+- Input: Website-URL der Firma (aus Google Maps)
+- Logik: Besucht Website, sucht E-Mail-Pattern auf Hauptseite
+- Falls keine gefunden: sucht auf /kontakt und /impressum
+- Filtert: info@, noreply@, support@ werden ignoriert
+- Bevorzugt: kontakt@, mail@, office@, anfragen@
+- Timeout: 5 Sekunden pro Website
+- Kein Treffer → Firma überspringen
+- Fehler → loggen, Firma überspringen
+
 ## Schritt 2: Google Sheets laden
 - Tab: "Buchhalter Outreach"
 - Spalten: A=Firma | B=Stadt | C=Status | D=Datum | E=Uhrzeit | F=Betreff
