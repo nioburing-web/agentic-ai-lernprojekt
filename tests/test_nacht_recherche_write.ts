@@ -88,7 +88,7 @@ const TEST_TAB = `ZZZ Test Write ${Date.now()}`;
 
     const zeile3 = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: `${TEST_TAB}!A3:R3`,
+      range: `${TEST_TAB}!A3:U3`,
     });
     const werte = zeile3.data.values?.[0] ?? [];
 
@@ -96,14 +96,39 @@ const TEST_TAB = `ZZZ Test Write ${Date.now()}`;
     check(werte[1] === "Testwerkstatt", `Name landet in Spalte B (B3 = "${werte[1] ?? "LEER"}")`);
     check(werte[5] === "DRAFT", `Status DRAFT landet in Spalte F — nur so findet morgen-versand ihn (F3 = "${werte[5] ?? "LEER"}")`);
     check(werte[17] === "abc123", `Demo-ID landet in Spalte R (R3 = "${werte[17] ?? "LEER"}")`);
+    check(
+      String(werte[18] ?? "").trim() === "",
+      `Spalte S bleibt leer — die füllt erst der Demo-Klick (S3 = "${werte[18] ?? "LEER"}")`,
+    );
 
-    // Nichts darf rechts von R stehen — dort landeten die verlorenen Zeilen.
+    // ── Bike-Phase 1: neue Kategorien dürfen NICHT automatisch rausgehen ──────
+    await _test.speichereDraft(
+      sheets, sheetId, "EMAIL", "Testsalon", "Hamburg",
+      "salon@example.invalid", "neutraler Entwurf", "samstag noch was frei", "def456", TEST_TAB,
+      "PRUEFEN", "Friseursalon", "termin-beauty",
+    );
+
+    const zeile4 = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${TEST_TAB}!A4:U4`,
+    });
+    const neu = zeile4.data.values?.[0] ?? [];
+
+    check(neu[0] === "EMAIL", `zweiter Draft landet ebenfalls in Spalte A (A4 = "${neu[0] ?? "LEER"}")`);
+    check(
+      neu[5] === "PRUEFEN",
+      `Status PRUEFEN in Spalte F — morgen-versand filtert auf DRAFT und lässt die Zeile liegen (F4 = "${neu[5] ?? "LEER"}")`,
+    );
+    check(neu[19] === "Friseursalon", `Nische landet in Spalte T (T4 = "${neu[19] ?? "LEER"}")`);
+    check(neu[20] === "termin-beauty", `Kategorie landet in Spalte U (U4 = "${neu[20] ?? "LEER"}")`);
+
+    // Nichts darf rechts von U stehen — rechts von R landeten am 15.07. die verlorenen Zeilen.
     const rechts = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: `${TEST_TAB}!S3:AJ3`,
+      range: `${TEST_TAB}!V3:AJ4`,
     });
-    const rechtsWerte = (rechts.data.values?.[0] ?? []).filter(z => String(z ?? "").trim() !== "");
-    check(rechtsWerte.length === 0, `keine Daten rechts von R (gefunden: ${JSON.stringify(rechtsWerte)})`);
+    const rechtsWerte = (rechts.data.values ?? []).flat().filter(z => String(z ?? "").trim() !== "");
+    check(rechtsWerte.length === 0, `keine Daten rechts von U (gefunden: ${JSON.stringify(rechtsWerte)})`);
 
     // Bestandszeile bleibt unangetastet
     const zeile2 = await sheets.spreadsheets.values.get({

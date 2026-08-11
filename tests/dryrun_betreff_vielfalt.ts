@@ -7,6 +7,10 @@
 
 import "dotenv/config";
 import { generiereEmailEntwurf, betreffKern, betreffIstBrauchbar } from "../src/trigger/nacht-recherche";
+import { KATEGORIEN } from "../src/trigger/nischen";
+
+const KFZ = KATEGORIEN.find((k) => k.slug === "kfz")!;
+const KFZ_NISCHE = KFZ.nischen[0]!;
 
 // Erfundene Werkstätten mit realistischem Website-Text. Bewusst keine echten
 // Betriebe — das hier ist ein Testlauf, kein Outreach.
@@ -51,10 +55,16 @@ async function main(): Promise<void> {
 
   for (let i = 0; i < WERKSTAETTEN.length; i++) {
     const w = WERKSTAETTEN[i]!;
-    const entwurf = await generiereEmailEntwurf(
-      w.name, w.stadt, "Kfz-Werkstatt", `https://beispiel-${i}.de`, w.text,
-      "https://kfz-demo-agent.netlify.app/r/testid", i, verbraucht,
-    );
+    const entwurf = await generiereEmailEntwurf({
+      firma: w.name,
+      stadt: w.stadt,
+      kategorie: KFZ,
+      nische: KFZ_NISCHE,
+      websiteText: w.text,
+      link: "https://kfz-demo-agent.netlify.app/r/testid",
+      betreffIndex: i,
+      verbrauchteBetreffe: verbraucht,
+    });
     betreffe.push(entwurf.betreff);
     verbraucht.push(entwurf.betreff);
     const ok = betreffIstBrauchbar(entwurf.betreff);

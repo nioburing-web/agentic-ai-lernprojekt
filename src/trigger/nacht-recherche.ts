@@ -3,6 +3,15 @@ import { schedules, wait } from "@trigger.dev/sdk";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import OpenAI from "openai";
+import {
+  aktiveKategorien,
+  begriffeDerKategorie,
+  nischeZuBegriff,
+  waehleKategorie,
+  type DemoProfil,
+  type Kategorie,
+  type Nische,
+} from "./nischen";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +47,15 @@ function fetchMitTimeout(url: string, options?: RequestInit, timeoutMs = 30000):
 const QUEUE_TAB = "Outreach Queue";
 const QUEUE_HEADER = ["Typ", "Name", "Stadt", "Kontakt", "Entwurf", "Status", "Erstellt", "Gesendet", "Betreff"];
 
+/**
+ * Status eines frischen Entwurfs.
+ *
+ * morgen-versand filtert hart auf "DRAFT". Eine Kategorie in Bike-Phase 1
+ * schreibt deshalb "PRUEFEN" — die Zeilen liegen im Sheet, gehen aber nicht
+ * raus, bis Nio sie gelesen und auf DRAFT gesetzt hat.
+ */
+export type DraftStatus = "DRAFT" | "PRUEFEN";
+
 async function sicherQueueTab(sheets: ReturnType<typeof googleSheets>, sheetId: string): Promise<void> {
   const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
   const tabExistiert = spreadsheet.data.sheets?.some(s => s.properties?.title === QUEUE_TAB);
@@ -65,16 +83,21 @@ async function sicherQueueTab(sheets: ReturnType<typeof googleSheets>, sheetId: 
 
   // R/S sind die Demo-Klick-Spalten. J–Q sind belegt (Fehlergrund, Reply-Classifier,
   // Nachfass-Datum), deshalb erst ab R.
-  const kopfRS = await sheets.spreadsheets.values.get({
+  //
+  // T/U kamen mit der Nischen-Verbreiterung dazu: ohne sie lässt sich die
+  // Reply-Rate nicht je Kategorie aufschlüsseln, und genau das versteckt sonst
+  // den Ausreisser (Lehre aus der Betreff-Monokultur vom 17.07.2026).
+  const kopfRU = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!R1:S1`,
+    range: `${QUEUE_TAB}!R1:U1`,
   });
-  if (kopfRS.data.values?.[0]?.[0] !== "Demo-ID") {
+  const kopf = kopfRU.data.values?.[0] ?? [];
+  if (kopf[0] !== "Demo-ID" || kopf[3] !== "Kategorie") {
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
-      range: `${QUEUE_TAB}!R1:S1`,
+      range: `${QUEUE_TAB}!R1:U1`,
       valueInputOption: "RAW",
-      requestBody: { values: [["Demo-ID", "Demo geklickt"]] },
+      requestBody: { values: [["Demo-ID", "Demo geklickt", "Nische", "Kategorie"]] },
     });
   }
 }
@@ -95,7 +118,7 @@ async function ladeVorhandeneKontakte(
   return kontakte;
 }
 
-// Letzte Zeile (1-basiert, ohne Header-Offset), die irgendwo in A–R noch etwas stehen hat.
+// Letzte Zeile (1-basiert, ohne Header-Offset), die irgendwo in A–U noch etwas stehen hat.
 // Bewusst über den ganzen Block statt nur über Spalte A: eine Zeile, deren A leer ist,
 // aber deren R belegt ist, darf nicht überschrieben werden.
 export function letzteBelegteZeile(rows: unknown[][]): number {
@@ -116,29 +139,33 @@ async function speichereDraft(
   entwurf: string,
   betreff = "",
   demoId = "",
-  tab: string = QUEUE_TAB
+  tab: string = QUEUE_TAB,
+  status: DraftStatus = "DRAFT",
+  nische = "",
+  kategorie = ""
 ): Promise<void> {
   const heute = new Date().toLocaleDateString("de-DE", {
     timeZone: "Europe/Berlin",
     day: "2-digit", month: "2-digit", year: "numeric",
   });
-  // A–I wie gehabt, J–Q bleiben leer (gehören anderen Agenten), R = Demo-ID.
-  const zeile = [typ, name, stadt, kontakt, entwurf, "DRAFT", heute, "", betreff,
-    "", "", "", "", "", "", "", "", demoId];
+  // A–I wie gehabt, J–Q bleiben leer (gehören anderen Agenten), R = Demo-ID,
+  // S = Demo geklickt (bleibt leer, füllt die Demo-Seite), T/U = Nische/Kategorie.
+  const zeile = [typ, name, stadt, kontakt, entwurf, status, heute, "", betreff,
+    "", "", "", "", "", "", "", "", demoId, "", nische, kategorie];
 
   // Kein values.append: dessen Tabellen-Erkennung sucht sich im Bereich A:R eine
   // "Tabelle" und fand ab dem 14.07.2026 den Demo-ID-Block in R1:S1 — jede Zeile
   // landete dann in R:AI statt A:I und war für morgen-versand unsichtbar.
-  // Deshalb Zielzeile selbst bestimmen und per update fest nach A<n>:R<n> schreiben.
+  // Deshalb Zielzeile selbst bestimmen und per update fest nach A<n>:U<n> schreiben.
   const bestand = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${tab}!A:R`,
+    range: `${tab}!A:U`,
   });
   const zielZeile = letzteBelegteZeile(bestand.data.values ?? []) + 1;
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: `${tab}!A${zielZeile}:R${zielZeile}`,
+    range: `${tab}!A${zielZeile}:U${zielZeile}`,
     valueInputOption: "RAW",
     requestBody: { values: [zeile] },
   });
@@ -158,6 +185,9 @@ const IGNORIERTE_DOMAINS = ["kammer", "schlichtung", "brak", "stbk", "steuerbera
 const BEVORZUGTE_PREFIXES = new Set([
   "kontakt", "contact", "mail", "office", "anfragen",
   "anfrage", "buchung", "beratung", "kanzlei",
+  // Mit den neuen Nischen dazugekommen: so heisst das Postfach bei Praxen,
+  // Salons und Studios meistens.
+  "termin", "termine", "praxis", "salon", "studio", "empfang", "rezeption",
 ]);
 
 async function suchePerGoogleMaps(branche: string, stadt: string) {
@@ -315,67 +345,72 @@ export async function holeWebsiteText(websiteUrl: string): Promise<string> {
   return text.slice(0, 2500).trim();
 }
 
-// Die Demo, die jeder Lead anklicken kann. Zeigt bewusst eine erfundene
-// "Demo-Werkstatt" — nie den Namen des angeschriebenen Betriebs.
+// Die Demo, die jeder Lead anklicken kann. Zeigt bewusst einen erfundenen
+// Beispiel-Betrieb — nie den Namen des angeschriebenen Betriebs.
 //
-// Jeder Lead bekommt ein anonymes Kürzel: /r/<id> zählt den Klick, schreibt ihn ins
-// Sheet (Spalte R/S + Tab "Demo Klicks") und leitet auf /demo weiter. Die ID sagt dem
-// Empfänger nichts über sich, sie ist nur in Nios Sheet einem Lead zugeordnet.
-const DEMO_BASIS = "https://kfz-demo-agent.netlify.app";
+// Jeder Lead bekommt ein anonymes Kürzel: die Klick-Route zählt den Klick, schreibt
+// ihn ins Sheet (Spalte R/S + Tab "Demo Klicks") und leitet auf die Demo weiter. Die
+// ID sagt dem Empfänger nichts über sich, sie ist nur in Nios Sheet einem Lead zugeordnet.
+//
+// Zwei Demos, zwei Netlify-Sites aus demselben Repo:
+//   werkstatt → /r/<id> → /demo       (KFZ, läuft seit Juni)
+//   lokal     → /a/<id> → /assistent  (branchenneutral, für alle anderen Nischen)
+export const DEMO_BASIS: Record<DemoProfil, string> = {
+  werkstatt: "https://kfz-demo-agent.netlify.app",
+  // Die neutrale Site wird über die Trigger.dev-Variable gesetzt, damit ein
+  // Umzug oder eine eigene Domain kein Deploy dieser Datei braucht.
+  lokal: process.env.DEMO_BASIS_LOKAL ?? "",
+};
+
+const KLICK_PFAD: Record<DemoProfil, string> = { werkstatt: "r", lokal: "a" };
 
 function neueDemoId(): string {
   return randomBytes(3).toString("hex"); // 6 Zeichen, z.B. "7f3a2b"
 }
 
-function demoLink(demoId: string): string {
-  return `${DEMO_BASIS}/r/${demoId}`;
+export function demoLink(demoId: string, profil: DemoProfil = "werkstatt"): string {
+  const basis = DEMO_BASIS[profil];
+  if (!basis) {
+    // Lieber laut abbrechen als 30 Mails mit kaputtem Link verschicken — der Klick
+    // ist das einzige Signal, das gemessen wird.
+    throw new Error(
+      `Keine Demo-Basis für Profil "${profil}". Setz DEMO_BASIS_LOKAL in den Trigger.dev-Variablen.`
+    );
+  }
+  return `${basis}/${KLICK_PFAD[profil]}/${demoId}`;
 }
-
-const BRANCHE_HOOKS: Record<string, string> = {
-  Steuerberater: "60% der Mandantenanfragen gehen an die Kanzlei, die als erstes antwortet — nicht an die beste.",
-  Buchhalter: "Wer eine Buchhaltungsanfrage nicht innerhalb von 2 Stunden beantwortet, verliert sie meist an den nächsten.",
-  Buchhaltung: "Wer eine Buchhaltungsanfrage nicht innerhalb von 2 Stunden beantwortet, verliert sie meist an den nächsten.",
-  Immobilienmakler: "Immobilienkäufer schreiben im Schnitt 3 Makler gleichzeitig — wer zuerst antwortet, macht das Geschäft.",
-  Rechtsanwalt: "Mandanten entscheiden sich oft für die Kanzlei, die als erste antwortet — nicht für die erfahrenste.",
-  Unternehmensberater: "Neue Anfragen landen häufig beim ersten Berater, der zurückschreibt — nicht beim besten.",
-  Zahnarzt: "30% der Terminanfragen kommen abends oder am Wochenende — und landen bei der Praxis, die als erste reagiert.",
-  Physiotherapie: "Patienten buchen beim ersten Therapeuten, der antwortet — Wartelisten entstehen durch langsame Reaktionszeiten.",
-  Versicherungsmakler: "Kunden fragen täglich nach Vertragsdetails und Schadensmeldungen — wer nicht sofort antwortet, verliert sie an den nächsten Makler.",
-  Hausverwaltung: "Mieter erwarten Antworten auf Anfragen innerhalb von Stunden — wer nicht schnell reagiert, riskiert Eskalation und schlechte Bewertungen.",
-  Tierarztpraxis: "Viele Tierbesitzer rufen abends oder am Wochenende an und finden niemanden — die erste Praxis die reagiert, bekommt den Termin.",
-  Notariat: "Mandanten fragen wiederholt nach dem Status ihrer Dokumente — manuelle Statusupdates fressen täglich wertvolle Arbeitszeit.",
-  "Kfz-Werkstatt": "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
-  Autowerkstatt: "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
-  "Kfz-Meisterbetrieb": "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
-  Autoservice: "Die meisten Anrufe kommen, wenn gerade niemand rangehen kann — jemand liegt unter dem Auto, der Kunde probiert es einmal und ruft dann die nächste Werkstatt an.",
-  Fahrschule: "Fahrschüler buchen Stunden und Prüfungen kurzfristig um — manuelle Verwaltung kostet täglich Stunden die fürs Unterrichten fehlen.",
-  Heilpraktiker: "Patienten erscheinen nicht zum Termin wenn sie keine Erinnerung bekommen — Ausfallrate sinkt spürbar mit automatischen Erinnerungen.",
-};
 
 // Drei wirklich unterschiedliche Mail-Strukturen, damit die Mails nicht wie ein
 // Serienbrief wirken. Pro Mail wird zufällig eine gewählt.
 // Alle drei laufen auf DASSELBE Ziel zu: den Demo-Link anklicken. Der Beweis
 // ersetzt das alte "ich schick dir bei Gelegenheit mal ein Beispiel".
-const MAIL_ANGLES: { name: string; struktur: string }[] = [
-  {
-    name: "detail-dann-demo",
-    struktur: `1. Steig mit EINER konkreten Beobachtung ein, die NUR auf diese Werkstatt zutrifft — ein echtes Detail von ihrer Seite (eine genannte Leistung, ein Schwerpunkt, eine Marke, ein Satz von ihnen). KEINE allgemeine Aussage über fehlende Website-Funktionen.
-2. EIN Satz zur Reibung: Anrufe kommen, während keiner rangehen kann.
+//
+// Bis 08.08.2026 stand hier "diese Werkstatt", "wenn alle in der Halle stehen"
+// und "Name, Fahrzeug, Anliegen, Wunschzeit" fest im Text — die Strukturen waren
+// damit für jede andere Nische unbrauchbar. Jetzt kommt das Branchen-Vokabular
+// als Parameter aus nischen.ts.
+export function mailAngles(k: Kategorie, n: Nische): { name: string; struktur: string }[] {
+  return [
+    {
+      name: "detail-dann-demo",
+      struktur: `1. Steig mit EINER konkreten Beobachtung ein, die NUR auf diesen Betrieb zutrifft — ein echtes Detail von ihrer Seite (eine genannte Leistung, ein Schwerpunkt, ein Satz von ihnen). KEINE allgemeine Aussage über fehlende Website-Funktionen.
+2. EIN Satz zur Reibung, sinngemäß und in eigenen Worten: ${n.hook}
 3. Führ den Demo-Link ein: du hast so einen Assistenten gebaut, er läuft, er kann direkt ausprobiert werden.`,
-  },
-  {
-    name: "frage-dann-demo",
-    struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieser Werkstatt).
-2. Stell eine echte, kurze Frage dazu, wie sie Anrufe heute abfangen, wenn alle in der Halle stehen — so wie jemand fragt, der das Thema versteht, nicht wie ein Verkäufer.
+    },
+    {
+      name: "frage-dann-demo",
+      struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieses Betriebs).
+2. Stell eine echte, kurze Frage dazu, wie sie Anfragen heute abfangen, wenn gerade niemand frei ist — so wie jemand fragt, der das Thema versteht, nicht wie ein Verkäufer.
 3. Führ den Demo-Link ein als das, was du dazu gebaut hast — er läuft, er ist in zehn Sekunden ausprobiert.`,
-  },
-  {
-    name: "demo-zuerst",
-    struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieser Werkstatt), kurz gehalten.
-2. Komm SOFORT zum Link: du hast einen Assistenten gebaut, der Anrufer abfängt, Fragen beantwortet und Termine aufnimmt — hier zum Ausprobieren.
-3. Erst DANACH ein Satz dazu, was das für sie hieße (Anfrage liegt fertig auf dem Tisch, mit Name, Fahrzeug, Anliegen, Wunschzeit).`,
-  },
-];
+    },
+    {
+      name: "demo-zuerst",
+      struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieses Betriebs), kurz gehalten.
+2. Komm SOFORT zum Link: du hast einen Assistenten gebaut, der Anfragen abfängt, Fragen beantwortet und Termine aufnimmt — hier zum Ausprobieren.
+3. Erst DANACH ein Satz dazu, was das für sie hieße (die Anfrage liegt fertig auf dem Tisch, mit ${k.demoFelder}).`,
+    },
+  ];
+}
 
 // Betreff-Blickwinkel. Am 17.07.2026 gingen 30 Erstmails raus, 19 davon trugen
 // wörtlich "Anruf" im Betreff, zwei Paare waren exakt identisch — Open Rate 10%
@@ -383,7 +418,7 @@ const MAIL_ANGLES: { name: string; struktur: string }[] = [
 // Betreff durfte sich wahlweise "auf das konkrete Detail ODER auf die verpassten
 // Anrufe" beziehen, und das Modell griff zur immer verfügbaren zweiten Option.
 //
-// Deshalb: kein Zufall wie bei MAIL_ANGLES, sondern harte Rotation über den
+// Deshalb: kein Zufall wie bei mailAngles(), sondern harte Rotation über den
 // Lauf-Index. Bei 30 Mails pro Nacht kommt so jeder Blickwinkel ~6x vor statt
 // einer Kategorie 19x.
 const BETREFF_ANGLES: { name: string; anweisung: string }[] = [
@@ -393,11 +428,11 @@ const BETREFF_ANGLES: { name: string; anweisung: string }[] = [
   },
   {
     name: "echte-frage",
-    anweisung: "Formuliere den Betreff als kurze, echte Frage zum Arbeitsalltag dieser Werkstatt — aber OHNE das Wort Anruf oder Telefon. Etwas, das ein Kollege fragen würde.",
+    anweisung: "Formuliere den Betreff als kurze, echte Frage zum Arbeitsalltag dieses Betriebs — aber OHNE das Wort Anruf oder Telefon. Etwas, das ein Kollege fragen würde.",
   },
   {
-    name: "marke-fahrzeug",
-    anweisung: "Nimm eine Fahrzeugmarke, einen Fahrzeugtyp oder eine Spezialisierung aus dem Website-Auszug (z.B. VW, Transporter, Hybrid) und bau den Betreff darum.",
+    name: "spezialisierung",
+    anweisung: "Nimm eine Spezialisierung, ein Verfahren oder ein besonderes Angebot aus dem Website-Auszug und bau den Betreff darum.",
   },
   {
     name: "ort-betrieb",
@@ -405,7 +440,7 @@ const BETREFF_ANGLES: { name: string; anweisung: string }[] = [
   },
   {
     name: "kundensicht",
-    anweisung: "Schreib den Betreff aus Sicht eines KUNDEN dieser Werkstatt, als wäre es der Anfang einer echten Kundenanfrage (z.B. \"termin für die hu?\"). Kein Wort über Anrufe.",
+    anweisung: "Schreib den Betreff aus Sicht eines KUNDEN dieses Betriebs, als wäre es der Anfang einer echten Kundenanfrage. Kein Wort über Anrufe.",
   },
 ];
 
@@ -429,6 +464,43 @@ export function betreffKern(betreff: string): string {
 // Die Wörter, die am 17.07.2026 in 19 von 30 Betreffen standen. Im Mailtext sind
 // sie weiter erlaubt und erwünscht — nur die Betreffzeile muss variieren.
 const BETREFF_VERBOTEN = ["anruf", "anrufen", "anrufe", "telefon", "verpasst"];
+
+// Rechtsformen und Gattungswörter taugen nicht als Nachweis: "Salon" in
+// "Salon Lindenhof" steht in jeder zweiten Mail ohnehin.
+const NAME_FUELLWOERTER = new Set([
+  "gmbh", "gbr", "ohg", "kg", "ag", "ug", "mbh", "co", "und", "the",
+  "salon", "studio", "praxis", "kanzlei", "restaurant", "gasthaus", "fahrschule",
+  "verwaltung", "hausverwaltung", "kosmetik", "physiotherapie", "werkstatt",
+  "autohaus", "partner", "team", "haus", "zentrum",
+]);
+
+/**
+ * Der markanteste Bestandteil eines Firmennamens — das Wort, an dem man den
+ * Betrieb wiedererkennt ("Kupferpfanne" aus "Gasthaus Kupferpfanne").
+ */
+export function markanterNamensteil(firma: string): string {
+  const woerter = firma
+    .split(/[\s\-&.,]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 4 && !NAME_FUELLWOERTER.has(w.toLowerCase()));
+  if (woerter.length === 0) return firma.trim();
+  return woerter.reduce((a, b) => (b.length > a.length ? b : a));
+}
+
+/**
+ * Steht der Betrieb namentlich in der Mail?
+ *
+ * Eine Prompt-Regel ist keine Garantie — der Dry-Run vom 09.08.2026 zeigte, dass
+ * 5 von 6 Mails den Namen trotz PFLICHT-Regel ausliessen und stattdessen "euer
+ * Salon" schrieben. Ohne Namen liest sich die Mail wie ein Serienbrief.
+ * Es zählt der volle Name ODER sein markanter Teil.
+ */
+export function nameIstGenannt(inhalt: string, firma: string): boolean {
+  const text = inhalt.toLowerCase();
+  if (text.includes(firma.toLowerCase().trim())) return true;
+  const kern = markanterNamensteil(firma).toLowerCase();
+  return kern.length >= 4 && text.includes(kern);
+}
 
 export function betreffIstBrauchbar(betreff: string, verbrauchte: string[] = []): boolean {
   const kern = betreffKern(betreff);
@@ -459,26 +531,36 @@ async function ladeLetzteBetreffe(
   return betreffe.slice(-anzahl);
 }
 
+export type EntwurfKontext = {
+  firma: string;
+  stadt: string;
+  kategorie: Kategorie;
+  nische: Nische;
+  websiteText?: string;
+  link: string;
+  betreffIndex?: number;
+  verbrauchteBetreffe?: string[];
+};
+
 export async function generiereEmailEntwurf(
-  firma: string,
-  stadt: string,
-  branche: string,
-  website?: string | null,
-  websiteText?: string,
-  link: string = demoLink("demo00"),
-  betreffIndex = 0,
-  verbrauchteBetreffe: string[] = []
+  kontext: EntwurfKontext
 ): Promise<{ betreff: string; inhalt: string }> {
+  const {
+    firma, stadt, kategorie, nische, websiteText, link,
+    betreffIndex = 0, verbrauchteBetreffe = [],
+  } = kontext;
   const openai = getOpenAI();
-  const branchenHinweis = BRANCHE_HOOKS[branche] ?? "Anfragen werden oft nicht schnell genug beantwortet — der Kunde ist dann schon weg.";
+  const branche = nische.name;
+  const branchenHinweis = nische.hook;
   const websiteAuszug = websiteText && websiteText.trim().length > 80 ? websiteText.trim().slice(0, 1800) : "";
   const betreffAngle = waehleBetreffAngle(betreffIndex);
+  const angles = mailAngles(kategorie, nische);
 
   // Ohne brauchbaren Website-Auszug ist keine echte Personalisierung möglich →
-  // immer "echte-frage" (ehrliche Frage statt erfundener Beobachtung).
+  // immer "demo-zuerst" (Link statt erfundener Beobachtung).
   const angle = websiteAuszug
-    ? MAIL_ANGLES[Math.floor(Math.random() * MAIL_ANGLES.length)]!
-    : MAIL_ANGLES[2]!;
+    ? angles[Math.floor(Math.random() * angles.length)]!
+    : angles[2]!;
 
   const nachrichten = [
       {
@@ -495,25 +577,28 @@ Struktur für DIESE Mail:
 ${angle.struktur}
 
 DAS HERZSTÜCK DIESER MAIL — der Demo-Link:
-Du hast einen digitalen Assistenten für Werkstätten gebaut. Er läuft, man kann ihn sofort anklicken und selbst mit ihm schreiben. Er beantwortet Fragen zu Leistungen, Öffnungszeiten und groben Preisrahmen und nimmt Terminanfragen auf (Name, Fahrzeug, Anliegen, Wunschzeit).
+Du hast einen digitalen Assistenten für ${kategorie.zielgruppe} gebaut. Er läuft, man kann ihn sofort anklicken und selbst mit ihm schreiben. ${kategorie.demoBeschreibung} Er nimmt dabei auf: ${kategorie.demoFelder}.
 - Der Link MUSS wörtlich, vollständig und unverändert in der Mail stehen, in einer eigenen Zeile: ${link}
 - Ändere den Link NICHT, kürze ihn nicht und bau ihn nicht in einen anderen Text ein.
-- Sag dazu, dass es eine Beispiel-Werkstatt ist, nicht ihre.
-- Gib EINEN konkreten Satz mit, den sie reinschreiben können, z.B.: Meine Bremsen quietschen.
+- Sag dazu, dass es ein erfundener Beispiel-Betrieb ist, nicht ihrer.
+- Gib EINEN konkreten Satz mit, den sie reinschreiben können, z.B.: ${nische.beispielFrage}
 - Nimm die Hürde: keine Anmeldung, es passiert nichts, niemand meldet sich deswegen.
 - Behaupte NICHT, du hättest die Demo für sie personalisiert oder ihren Betrieb nachgebaut. Das stimmt nicht.
 
+Ton:
+${kategorie.register.ton}
+
 Regeln:
-- Beginne mit "Hey," (oder einer ähnlich lockeren Anrede) und steig DANN direkt mit dem konkreten Detail ein. Starte NICHT mit "ich habe gesehen", "mir ist aufgefallen", "ich bin auf euch gestoßen" oder einer ähnlichen Beobachtungs-Floskel — das ist der klassische Serienbrief-Einstieg. Der erste inhaltliche Satz muss variieren.
+- ${kategorie.register.anrede} und steig DANN direkt mit dem konkreten Detail ein. Starte NICHT mit "ich habe gesehen", "mir ist aufgefallen", "ich bin auf euch gestoßen" oder einer ähnlichen Beobachtungs-Floskel — das ist der klassische Serienbrief-Einstieg. Der erste inhaltliche Satz muss variieren.
+- PFLICHT: Nenne den Betrieb einmal beim Namen. Schreib "${firma}" oder den markanten Teil davon (bei "Gasthaus Kupferpfanne" reicht "Kupferpfanne"). NICHT "euer Salon", "Ihre Kanzlei", "euer Betrieb" — ohne den Namen liest sich die Mail wie ein Serienbrief an hundert Adressen.
 - Sag in EINEM beiläufigen Halbsatz wer du bist: Nio, baust KI-Agenten in Hamburg. Keine förmliche Vorstellung, kein Lebenslauf.
-- Erwähne ${firma} einmal natürlich im Text
 - Unter 110 Wörter, keine Signatur, keine Anführungszeichen
 - KEIN Preis, kein "2 Wochen"-Angebot — der Link soll klicken lassen, nicht verkaufen
 - Erfinde keine Ergebnisse, Zahlen oder Referenzkunden
 - Abschluss: EINE weiche, echte Frage, ob das für sie einen Blick wert wäre. Direkt danach ein leichter Ausweg (Risk-Reversal): wenn's gerade nicht passt, reicht ein kurzes "kein Interesse" und du meldest dich nicht wieder.
 - Verbotene Marketing-Wörter: "revolutionieren", "optimieren", "transformieren", "maßgeschneidert", "innovativ", "Lösung", "effizienzsteigerung", "testen"
 - Verbotene Floskeln (zu oft benutzt, wirken wie Serienbrief — formuliere frisch): "liegen bleiben", "genau dieses Problem lösen", "wer zuerst antwortet gewinnt", "Soll ich dir kurz skizzieren wie das bei euch konkret aussehen könnte", "Lust die Idee mal kurz weiterzudenken", "hättet ihr Lust die Idee durchzusprechen"
-- Nutze NICHT als Aufhänger: "keine Online-Terminbuchung", "nur ein Kontaktformular", "kein Live-Chat" — das ist generisch. Finde etwas, das wirklich nach DIESER Werkstatt klingt.
+- Nutze NICHT als Aufhänger: "keine Online-Terminbuchung", "nur ein Kontaktformular", "kein Live-Chat" — das ist generisch. Finde etwas, das wirklich nach DIESEM Betrieb klingt.
 
 BETREFF — eigene Aufgabe, nicht nebenbei erledigen:
 Blickwinkel für DIESEN Betreff (verbindlich): ${betreffAngle.anweisung}
@@ -521,7 +606,7 @@ Blickwinkel für DIESEN Betreff (verbindlich): ${betreffAngle.anweisung}
 - Der Betreff darf das Wort "Anruf", "anrufen" oder "Telefon" NICHT enthalten. Auch nicht "verpasst". Das Thema gehört in den Mailtext, nicht in die Betreffzeile.
 - Kein generisches "Interesse an…", "Idee für…", "Frage zu…". Dieselben verbotenen Marketing-Wörter wie oben gelten auch hier.
 - Der Betreff muss auch für einen Außenstehenden verständlich klingen — KEIN hyper-spezifischer Nischenbegriff von ihrer Seite, der aus dem Kontext gerissen seltsam wirkt.
-${verbrauchteBetreffe.length > 0 ? `- VERBRAUCHT — diese Betreffe wurden bereits an andere Werkstätten geschickt. Formuliere etwas erkennbar anderes, nicht bloß umgestellt:\n${verbrauchteBetreffe.map((b) => `  · ${b}`).join("\n")}\n` : ""}
+${verbrauchteBetreffe.length > 0 ? `- VERBRAUCHT — diese Betreffe wurden bereits an andere Betriebe geschickt. Formuliere etwas erkennbar anderes, nicht bloß umgestellt:\n${verbrauchteBetreffe.map((b) => `  · ${b}`).join("\n")}\n` : ""}
 Format:
 BETREFF: <betreff>
 EMAIL: <email-text>`,
@@ -555,6 +640,21 @@ EMAIL: <email-text>`,
     );
     if (!betreffIstBrauchbar(ergebnis.betreff, verbrauchteBetreffe)) {
       console.log(`Betreff auch im 2. Versuch unbrauchbar ("${ergebnis.betreff}") für ${firma}`);
+    }
+  }
+
+  // Gleiche Behandlung für den Firmennamen: prüfen statt hoffen.
+  if (!nameIstGenannt(ergebnis.inhalt, firma)) {
+    console.log(`Firmenname fehlt im Entwurf – Neuversuch für ${firma}`);
+    const nachgefasst = await erzeuge(
+      `In der Mail fehlt der Name des Betriebs. Gib denselben Betreff und dieselbe Mail erneut aus, aber nenne den Betrieb genau einmal beim Namen: "${firma}" oder "${markanterNamensteil(firma)}". Ersetze dafür eine Umschreibung wie "euer Salon" oder "Ihre Kanzlei". Sonst nichts ändern. Wieder im Format BETREFF: / EMAIL:.`
+    );
+    // Nur übernehmen, wenn der zweite Versuch das Problem wirklich löst — sonst
+    // lieber die erste, sprachlich saubere Fassung behalten.
+    if (nameIstGenannt(nachgefasst.inhalt, firma)) {
+      ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
+    } else {
+      console.log(`Firmenname auch im 2. Versuch nicht drin für ${firma}`);
     }
   }
   return ergebnis;
@@ -601,10 +701,6 @@ export const nachtRecherche = schedules.task({
     let betreffIndex = 0;
     console.log(`${verbrauchteBetreffe.length} bisherige Betreffe geladen (werden als verbraucht behandelt)`);
 
-    // Nische seit dem Pivot am 13.07.2026: nur KFZ-Werkstätten. Grund: der Demo-Link
-    // zeigt eine Werkstatt. Eine Zahnarztpraxis mit einer Werkstatt-Demo anzuschreiben
-    // wäre unpassend.
-    const SUCHBEGRIFFE = ["Kfz-Werkstatt", "Autowerkstatt", "Kfz-Meisterbetrieb", "Autoservice"];
     const STAEDTE = [
       "Hamburg", "Berlin", "Köln", "München", "Stuttgart", "Frankfurt", "Düsseldorf", "Leipzig",
       "Dortmund", "Essen", "Bremen", "Dresden", "Hannover", "Nürnberg", "Duisburg", "Bochum",
@@ -619,15 +715,41 @@ export const nachtRecherche = schedules.task({
     // NICHT vom Suchbegriff-Zuschnitt. Der Ertrag war die ganze Zeit in Ordnung — die
     // Drafts landeten nur in den falschen Spalten (siehe speichereDraft).
     const STAEDTE_PRO_NACHT = 6;   // Fenster; bricht früher ab sobald Deckel erreicht
-    const BEGRIFFE_PRO_STADT = 2;  // 2 der 4 Synonyme reichen (Rest ist Überlappung)
+    const BEGRIFFE_PRO_STADT = 3;  // Stichprobe aus den Begriffen der Kategorie
     const TAGES_DECKEL = 30;
+
+    // Harte Bremse gegen den Ausfall ab dem 29.07.2026: als der KFZ-Pool leer war,
+    // churnte der Lauf alle Städte durch, riss die 15-Minuten-Grenze und endete als
+    // TIMED_OUT — also ohne Log, ohne Zahl, ohne Alarm. Neun Nächte lang.
+    // Mit dem Budget endet der Lauf sauber als "completed" und sagt, wie viel er
+    // geschafft hat. Eine Null ist erst dann eine echte Null.
+    const LAUF_BUDGET_MS = 12 * 60_000;
+    const start = Date.now();
+    const budgetAlle = () => Date.now() - start > LAUF_BUDGET_MS;
 
     // Städte rotieren über den Jahrestag, damit derselbe Ort nicht jede Woche drankommt.
     const tagImJahr = Math.floor(
       (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000
     );
-    const zielStaedte = waehleStaedte(STAEDTE, tagImJahr, STAEDTE_PRO_NACHT);
 
+    // Eine Kategorie pro Nacht. So ist ein Batch = eine Kategorie = eine
+    // Bewertungseinheit für die Reply-Rate, und Nio prüft in Bike-Phase 1
+    // pro Nacht genau einen Ton statt drei gemischt.
+    const kategorie = waehleKategorie(tagImJahr);
+    if (!kategorie) {
+      console.log("Keine aktive Kategorie in nischen.ts — nichts zu tun.");
+      return;
+    }
+
+    // Lieber hier abbrechen als 30 Mails mit kaputtem Demo-Link erzeugen.
+    demoLink("pruefung", kategorie.demo);
+
+    const zielStaedte = waehleStaedte(STAEDTE, tagImJahr, STAEDTE_PRO_NACHT);
+    const kategorieBegriffe = begriffeDerKategorie(kategorie);
+    const draftStatus: DraftStatus = kategorie.imTest ? "PRUEFEN" : "DRAFT";
+
+    console.log(`Kategorie heute: ${kategorie.label} (${kategorie.slug}), Demo: ${kategorie.demo}`);
+    console.log(`Status der Entwürfe: ${draftStatus}${kategorie.imTest ? " — gehen NICHT automatisch raus, Nio prüft erst" : ""}`);
     console.log(`Ziel-Städte (${zielStaedte.length}): ${zielStaedte.join(", ")}`);
 
     // ── Phase 1: E-Mail-Leads ─────────────────────────────────────────────────
@@ -636,19 +758,31 @@ export const nachtRecherche = schedules.task({
 
     for (const zielstadt of zielStaedte) {
       if (emailGespeichert >= TAGES_DECKEL) break;
+      if (budgetAlle()) {
+        console.log(`Zeitbudget erreicht — Lauf endet nach ${zielstadt} nicht mehr weiter`);
+        break;
+      }
 
-      // Pro Stadt eine frische, gemischte Auswahl der Suchbegriffe.
-      const zielBranchen = [...SUCHBEGRIFFE].sort(() => Math.random() - 0.5).slice(0, BEGRIFFE_PRO_STADT);
+      // Pro Stadt eine frische, gemischte Auswahl der Suchbegriffe dieser Kategorie.
+      const zielBranchen = [...kategorieBegriffe].sort(() => Math.random() - 0.5).slice(0, BEGRIFFE_PRO_STADT);
       console.log(`Stadt: ${zielstadt} (${zielBranchen.join(", ")})...`);
 
       for (const zielbranche of zielBranchen) {
         if (emailGespeichert >= TAGES_DECKEL) break;
+        if (budgetAlle()) break;
 
         try {
           const firmen = await suchePerGoogleMaps(zielbranche, zielstadt);
 
+          const nische = nischeZuBegriff(kategorie, zielbranche);
+          if (!nische) {
+            console.error(`Suchbegriff "${zielbranche}" gehört zu keiner Nische in ${kategorie.slug} — übersprungen`);
+            continue;
+          }
+
           for (const firma of firmen) {
             if (emailGespeichert >= TAGES_DECKEL) break;
+            if (budgetAlle()) break;
 
             // Fehler-Isolation pro Shop: ein einzelner Fetch-/LLM-/Sheets-Fehler
             // darf nicht die restlichen Shops dieses Begriffs mitreißen (vorher lag
@@ -679,10 +813,16 @@ export const nachtRecherche = schedules.task({
                 continue;
               }
               const demoId = neueDemoId();
-              const entwurf = await generiereEmailEntwurf(
-                firma.name, zielstadt, zielbranche, website, websiteText, demoLink(demoId),
-                betreffIndex, verbrauchteBetreffe
-              );
+              const entwurf = await generiereEmailEntwurf({
+                firma: firma.name,
+                stadt: zielstadt,
+                kategorie,
+                nische,
+                websiteText,
+                link: demoLink(demoId, kategorie.demo),
+                betreffIndex,
+                verbrauchteBetreffe,
+              });
               betreffIndex++;
               // Sofort als verbraucht führen, damit die nächste Mail desselben Laufs
               // den Betreff nicht wiederholt (17.07.: 2 exakte Duplikate im Batch).
@@ -696,12 +836,13 @@ export const nachtRecherche = schedules.task({
               }
 
               await speichereDraft(
-                sheets, sheetId, "EMAIL", firma.name, zielstadt, email, entwurf.inhalt, entwurf.betreff, demoId
+                sheets, sheetId, "EMAIL", firma.name, zielstadt, email, entwurf.inhalt, entwurf.betreff, demoId,
+                QUEUE_TAB, draftStatus, nische.name, kategorie.slug
               );
               vorhandene.add(email.toLowerCase());
               emailGespeichert++;
 
-              console.log(`E-Mail-Draft: ${firma.name} → ${email} (${zielstadt}, Demo-ID ${demoId})`);
+              console.log(`${draftStatus}: ${firma.name} → ${email} (${zielstadt}, ${nische.name}, Demo-ID ${demoId})`);
               await wait.for({ seconds: 2 });
             } catch (shopErr) {
               console.error(`Shop ${firma.name} übersprungen:`, shopErr);
@@ -714,7 +855,15 @@ export const nachtRecherche = schedules.task({
       }
     }
 
-    console.log(`E-Mail-Phase fertig: ${emailGespeichert}/30 Drafts`);
-    console.log(`=== Nacht-Recherche fertig: ${emailGespeichert} E-Mail Drafts ===`);
+    const dauerMin = ((Date.now() - start) / 60_000).toFixed(1);
+    console.log(`E-Mail-Phase fertig: ${emailGespeichert}/${TAGES_DECKEL} Entwürfe in ${dauerMin} min`);
+    if (emailGespeichert === 0) {
+      console.log(
+        `WARNUNG: 0 Entwürfe für ${kategorie.label}. Pool erschöpft, Maps-Billing aus oder Quality-Gate zu streng — nicht als "läuft schon" abhaken.`
+      );
+    }
+    console.log(
+      `=== Nacht-Recherche fertig: ${emailGespeichert} Entwürfe (${kategorie.label}, Status ${draftStatus}) ===`
+    );
   },
 });
