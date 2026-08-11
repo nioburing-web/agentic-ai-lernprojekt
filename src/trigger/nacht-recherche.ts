@@ -680,13 +680,15 @@ export function waehleStaedte(alle: string[], tagImJahr: number, anzahl: number)
 
 export const nachtRecherche = schedules.task({
   id: "nacht-recherche",
-  // Cron pausiert am 08.08.2026 (Nios Wunsch): KFZ-Lead-Pool erschöpft, Lauf lief
-  // ab 29.07. jede Nacht ins Timeout (0 neue Leads). Bleibt aus bis zum Nische-neu-
-  // Umbau via /level-up. Reaktivieren: cron-Block wieder einkommentieren + deployen.
-  // cron: {
-  //   pattern: "0 23 * * 0-4", // 23:00 CEST So–Do → bereit für Mo–Fr morgens
-  //   timezone: "Europe/Berlin",
-  // },
+  // Am 08.08.2026 pausiert (KFZ-Pool erschöpft, Lauf lief ab 29.07. jede Nacht ins
+  // Timeout), am 11.08.2026 wieder scharf: die Rotation läuft jetzt über drei neue
+  // Kategorien, KFZ steht in nischen.ts auf aktiv: false.
+  // Die neuen Kategorien schreiben Status PRUEFEN — morgen-versand rührt sie nicht
+  // an, bis Nio sie gelesen und auf DRAFT gesetzt hat (Bike-Method Phase 1).
+  cron: {
+    pattern: "0 23 * * 0-4", // 23:00 CEST So–Do → bereit für Mo–Fr morgens
+    timezone: "Europe/Berlin",
+  },
   machine: "small-2x",
   maxDuration: 900,
   run: async () => {
