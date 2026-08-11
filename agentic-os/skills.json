@@ -1,0 +1,14 @@
+[
+  {"name": "email-qualitaet", "domain": "Outreach",
+   "beschreibung": "E-Mail Qualität prüfen"},
+  {"name": "buchhalter-outreach", "domain": "Outreach",
+   "beschreibung": "Buchhalter anschreiben"},
+  {"name": "reporting-qualitaet", "domain": "Reporting",
+   "beschreibung": "Report generieren"},
+  {"name": "klassifizierung", "domain": "Kommunikation",
+   "beschreibung": "Antworten klassifizieren"},
+  {"name": "vertrieb-gespraech", "domain": "Vertrieb",
+   "beschreibung": "Demo-Call vorbereiten"},
+  {"name": "onboarding-kunde", "domain": "Produkt",
+   "beschreibung": "Kunden onboarden"}
+]

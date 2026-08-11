@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic OS — NIO Automation</title>
+<style>
+
+/* ─── TOKENS ──────────────────────────────────────────── */
+:root {
+  --bg:        #0a0a0a;
+  --bg-card:   #111111;
+  --bg-elev:   #161616;
+  --border:    #1e1e1e;
+  --ring-soft: rgba(249,115,22,0.15);
+  --accent:    #f97316;
+  --accent-dim: rgba(249,115,22,0.2);
+  --fg:        #e5e5e5;
+  --fg-mute:   #555555;
+  --fg-dim:    #333333;
+  --good:      #22c55e;
+  --warn:      #eab308;
+  --bad:       #ef4444;
+  --font:      "Courier New", Courier, monospace;
+}
+
+/* ─── RESET ───────────────────────────────────────────── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ─── BASE ────────────────────────────────────────────── */
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13px;
+  height: 100vh;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar        { width: 4px; }
+::-webkit-scrollbar-track  { background: var(--bg); }
+::-webkit-scrollbar-thumb  { background: var(--bg-elev); }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ─── PULSE DOT ───────────────────────────────────────── */
+.pulse-dot {
+  width: 8px; height: 8px;
+  background: var(--good); border-radius: 50%;
+  display: inline-block; margin-right: 0.5rem;
+  vertical-align: middle;
+  animation: pulse 1.1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 1.0; }
+}
+
+/* ─── HEADER ──────────────────────────────────────────── */
+.header {
+  height: 44px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: stretch;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 0 14px;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.brand-name {
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.18em;
+  color: var(--fg);
+}
+
+.brand-sep { color: var(--fg-dim); }
+
+.brand-sub {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--fg-mute);
+}
+
+/* ─── TABS ────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  overflow-x: auto;
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+  height: 100%;
+  padding: 0 18px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-mute);
+  font-family: var(--font);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+.tab-btn:hover { color: var(--fg); }
+.tab-btn.on {
+  background: var(--accent);
+  color: #000;
+  font-weight: bold;
+  border-bottom-color: transparent;
+}
+
+.header-clock {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  border-left: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+/* ─── WORKSPACE ───────────────────────────────────────── */
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  height: calc(100vh - 44px);
+  margin-top: 44px;
+}
+
+/* ─── LEFT COLUMN ─────────────────────────────────────── */
+.left {
+  overflow-y: auto;
+  padding: 20px;
+  border-right: 1px solid var(--border);
+}
+
+.panel { display: none; }
+.panel.on { display: block; }
+
+/* ─── HERO CARDS ──────────────────────────────────────── */
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 1.2rem;
+}
+
+.hero-card {
+  background: var(--bg-card);
+  border-radius: 3px;
+  padding: 0.85rem 1rem;
+  box-shadow: 0 0 0 1px var(--ring-soft);
+  min-height: 92px;
+}
+
+.hero-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  margin-bottom: 0.45rem;
+}
+
+.hero-headline {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.hero-headline em { font-style: normal; color: var(--accent); }
+
+.hero-bar {
+  height: 4px;
+  background: var(--bg-elev);
+  border-radius: 1px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.hero-bar > .fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 1px;
+  transition: width 0.6s ease;
+}
+
+/* ─── LABELS ──────────────────────────────────────────── */
+.cat-label {
+  color: var(--accent);
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  font-weight: 500;
+  text-transform: uppercase;
+  margin: 1rem 0 0.35rem 0;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ring-soft);
+}
+
+.col-label {
+  color: var(--fg);
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+  font-weight: 500;
+  text-transform: uppercase;
+  margin: 0.4rem 0 0.6rem 0;
+}
+
+/* ─── INTEGRATIONS STRIP ──────────────────────────────── */
+.mcp-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.3rem 0 0.6rem 0;
+}
+
+.mcp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+  box-shadow: 0 0 0 1px var(--ring-soft);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+.mcp-chip::before { content: "●"; color: var(--accent); font-size: 0.5rem; }
+
+/* ─── SKILL BUTTONS ───────────────────────────────────── */
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+  margin-bottom: 0.8rem;
+}
+
+.skill-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.75rem;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+
+.skill-btn:hover    { border-color: var(--accent); }
+.skill-btn:active   { background: var(--accent-dim); }
+.skill-btn.selected { border-color: var(--accent); background: var(--accent-dim); }
+
+.skill-btn-name { font-weight: bold; font-size: 0.75rem; }
+.skill-btn-desc { font-size: 0.65rem; color: var(--fg-mute); margin-top: 2px; }
+
+/* ─── RUN AREA ────────────────────────────────────────── */
+.run-area {
+  margin-top: 1.2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.prompt-ta {
+  width: 100%;
+  min-height: 90px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 0.8rem;
+  padding: 10px 12px;
+  resize: vertical;
+  outline: none;
+  margin-bottom: 0.6rem;
+  line-height: 1.5;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.prompt-ta:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim), inset 0 0 20px rgba(249,115,22,0.03);
+}
+
+.prompt-ta::placeholder { color: var(--fg-dim); }
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+
+/* ─── RUN BUTTON ──────────────────────────────────────── */
+.run-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  padding: 10px 20px;
+  font-family: var(--font);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 3px;
+  width: 100%;
+  transition: opacity 0.15s, box-shadow 0.15s;
+  flex: 1;
+}
+
+.run-btn:hover:not(:disabled) { opacity: 0.85; box-shadow: 0 0 16px var(--accent-dim); }
+.run-btn:disabled              { opacity: 0.5; cursor: wait; }
+
+.clear-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg-mute);
+  padding: 10px 14px;
+  font-family: var(--font);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.clear-btn:hover { border-color: var(--fg-mute); color: var(--fg); }
+
+.save-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg-mute);
+  padding: 10px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: border-color 0.15s;
+  line-height: 1;
+}
+
+.save-btn:hover { border-color: var(--accent); }
+
+.status-row {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ─── RIGHT SIDEBAR ───────────────────────────────────── */
+.right {
+  overflow-y: auto;
+  background: var(--bg-card);
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sidebar-section {}
+
+.sidebar-label {
+  font-size: 0.6rem;
+  letter-spacing: 0.2em;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ─── RECENT RUNS ─────────────────────────────────────── */
+.recent-run {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--bg-elev);
+  font-size: 0.72rem;
+}
+
+.recent-run:last-child { border-bottom: none; }
+
+.run-dot           { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.run-dot.running   { background: var(--good); box-shadow: 0 0 5px var(--good); animation: pulse 1.1s infinite; }
+.run-dot.completed { background: var(--fg-dim); }
+.run-dot.error     { background: var(--bad); }
+
+.run-skill { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-time  { color: var(--fg-mute); font-size: 0.65rem; white-space: nowrap; }
+
+/* ─── SVG CHART ───────────────────────────────────────── */
+.chart-wrap {
+  background: var(--bg-elev);
+  border-radius: 2px;
+  padding: 8px 0 0;
+}
+
+.chart-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 4px 4px;
+  font-size: 0.55rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.04em;
+}
+
+/* ─── FORECAST ────────────────────────────────────────── */
+.forecast-text {
+  font-size: 0.72rem;
+  color: var(--fg-mute);
+  line-height: 1.7;
+}
+
+.forecast-text strong { color: var(--accent); }
+
+/* ─── VAULT PULSE ITEMS ───────────────────────────────── */
+.vault-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.65rem;
+  color: var(--fg-mute);
+}
+
+.vault-item .tag {
+  color: var(--accent);
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  min-width: 50px;
+}
+
+/* ─── STATUS BADGES ───────────────────────────────────── */
+.sbadge {
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+.sbadge.completed { color: var(--good); background: rgba(34,197,94,0.1); }
+.sbadge.running   { color: var(--warn); background: rgba(234,179,8,0.1); }
+.sbadge.error     { color: var(--bad);  background: rgba(239,68,68,0.1); }
+
+/* ─── SHARED TABLE ────────────────────────────────────── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.data-table th {
+  text-align: left;
+  color: var(--fg-mute);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  font-weight: normal;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--bg-elev);
+  color: var(--fg);
+}
+
+.data-table tr:hover td { background: var(--bg-card); }
+
+/* ─── DAILY NOTE ──────────────────────────────────────── */
+.daily-entry {
+  display: grid;
+  grid-template-columns: 48px 1fr 90px;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bg-elev);
+  font-size: 0.75rem;
+  align-items: center;
+}
+
+.daily-time { color: var(--fg-mute); }
+
+/* ─── DRAFTS ──────────────────────────────────────────── */
+.draft-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.draft-item:hover { border-color: var(--accent); }
+
+.draft-meta {
+  font-size: 0.6rem;
+  color: var(--fg-mute);
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.draft-del {
+  color: var(--bad);
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-family: var(--font);
+  font-size: 0.7rem;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.draft-text {
+  font-size: 0.75rem;
+  color: var(--fg);
+  line-height: 1.4;
+}
+
+.empty-state {
+  color: var(--fg-mute);
+  font-size: 0.78rem;
+  padding: 24px 0;
+  text-align: center;
+}
+
+</style>
+</head>
+<body>
+
+<!-- ─── HEADER ──────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-brand">
+    <span class="pulse-dot" style="background:var(--accent);animation-duration:2s;margin-right:0"></span>
+    <span class="brand-name">AGENTIC OS</span>
+    <span class="brand-sep">&nbsp;—&nbsp;</span>
+    <span class="brand-sub">NIO AUTOMATION</span>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab-btn on" data-tab="claude-code">CLAUDE CODE</button>
+    <button class="tab-btn"   data-tab="vault">VAULT</button>
+    <button class="tab-btn"   data-tab="daily-note">DAILY NOTE</button>
+    <button class="tab-btn"   data-tab="runs-folder">RUNS FOLDER</button>
+    <button class="tab-btn"   data-tab="drafts">DRAFTS</button>
+  </nav>
+
+  <div class="header-clock" id="clock">--:--:--</div>
+</header>
+
+<!-- ─── WORKSPACE ───────────────────────────────────────── -->
+<div class="workspace">
+
+  <!-- LEFT COLUMN -->
+  <main class="left">
+
+    <!-- ══ TAB: CLAUDE CODE ══ -->
+    <div class="panel on" id="p-claude-code">
+
+      <div class="hero-grid">
+        <div class="hero-card">
+          <div class="hero-label">TOTAL RUNS</div>
+          <div class="hero-headline" id="h-total">—</div>
+          <div class="hero-bar"><div class="fill" id="hb-total" style="width:0%"></div></div>
+        </div>
+        <div class="hero-card">
+          <div class="hero-label">HEUTE</div>
+          <div class="hero-headline" id="h-today">—</div>
+          <div class="hero-bar"><div class="fill" id="hb-today" style="width:0%"></div></div>
+        </div>
+        <div class="hero-card">
+          <div class="hero-label">AKTIV</div>
+          <div class="hero-headline" id="h-active">—</div>
+          <div class="hero-bar"><div class="fill" id="hb-active" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <div class="col-label">INTEGRATIONS</div>
+      <div class="mcp-strip">
+        <span class="mcp-chip">claude</span>
+        <span class="mcp-chip">trigger.dev</span>
+        <span class="mcp-chip">gmail</span>
+        <span class="mcp-chip">google sheets</span>
+        <span class="mcp-chip">brevo</span>
+        <span class="mcp-chip">openai</span>
+      </div>
+
+      <div id="skillsArea">
+        <div style="color:var(--fg-mute);font-size:0.75rem">Skills werden geladen…</div>
+      </div>
+
+      <div class="run-area">
+        <div class="col-label">PROMPT</div>
+        <textarea id="promptTa" class="prompt-ta"
+          placeholder="Prompt eingeben…"></textarea>
+        <div class="btn-row">
+          <button id="runBtn" class="run-btn" onclick="doRun()">▶ RUN</button>
+          <button class="clear-btn" onclick="clearRun()">CLEAR</button>
+          <button class="save-btn" onclick="saveDraft()" title="Als Draft speichern">💾</button>
+        </div>
+        <div class="status-row" id="runStatus">
+          <span style="color:var(--fg-mute)">READY</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ TAB: VAULT ══ -->
+    <div class="panel" id="p-vault">
+      <div class="col-label">VAULT — ABGESCHLOSSENE RUNS</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>SKILL</th><th>DOMAIN</th><th>PID</th><th>STATUS</th><th>ZEIT</th>
+          </tr>
+        </thead>
+        <tbody id="vaultBody"></tbody>
+      </table>
+    </div>
+
+    <!-- ══ TAB: DAILY NOTE ══ -->
+    <div class="panel" id="p-daily-note">
+      <div class="col-label">DAILY NOTE —
+        <span id="dailyDate" style="color:var(--accent);font-weight:normal"></span>
+      </div>
+      <div id="dailyLog"></div>
+    </div>
+
+    <!-- ══ TAB: RUNS FOLDER ══ -->
+    <div class="panel" id="p-runs-folder">
+      <div class="col-label">RUNS FOLDER</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>SKILL</th><th>PID</th><th>STATUS</th><th>ZEIT</th></tr>
+        </thead>
+        <tbody id="runsBody"></tbody>
+      </table>
+    </div>
+
+    <!-- ══ TAB: DRAFTS ══ -->
+    <div class="panel" id="p-drafts">
+      <div class="col-label">DRAFTS</div>
+      <div id="draftsList"></div>
+    </div>
+
+  </main>
+
+  <!-- RIGHT SIDEBAR -->
+  <aside class="right">
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">RECENT RUNS</div>
+      <div id="recentRunsList"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">AKTIVITÄT — 7 TAGE</div>
+      <div class="chart-wrap">
+        <svg id="actChart" width="100%" height="70"
+          viewBox="0 0 272 70" preserveAspectRatio="none"></svg>
+        <div class="chart-labels" id="chartLabels"></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">FORECAST</div>
+      <div class="forecast-text" id="forecastText"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">VAULT PULSE</div>
+      <div id="vaultPulseList"></div>
+    </div>
+
+  </aside>
+</div>
+
+<script>
+
+// ─── STATE ──────────────────────────────────────────────
+let allSkills   = [];
+let allRuns     = [];
+let statsData   = { total_runs: 0, today: 0, active: 0 };
+let activeSkill = null;
+let drafts      = JSON.parse(localStorage.getItem('agentic-os-drafts') || '[]');
+
+// ─── INIT ────────────────────────────────────────────────
+async function init() {
+  tickClock();
+  setInterval(tickClock, 1000);
+  document.getElementById('dailyDate').textContent =
+    new Date().toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long' });
+  await Promise.all([loadSkills(), loadData()]);
+  renderDrafts();
+  setInterval(refreshData, 30_000);
+}
+
+// ─── CLOCK ───────────────────────────────────────────────
+function tickClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
+// ─── LOAD SKILLS ─────────────────────────────────────────
+async function loadSkills() {
+  try {
+    const r = await fetch('/api/skills');
+    if (!r.ok) throw 0;
+    allSkills = await r.json();
+  } catch {
+    try {
+      const r = await fetch('skills.json');
+      const raw = await r.json();
+      allSkills = raw.map(s => ({
+        name: s.name, domain: s.domain,
+        content: s.beschreibung, file: ''
+      }));
+    } catch { allSkills = []; }
+  }
+  renderSkills();
+}
+
+// ─── LOAD STATS + RUNS ───────────────────────────────────
+async function loadData() {
+  let liveOk = false;
+  try {
+    const r = await fetch('/api/stats');
+    if (!r.ok) throw 0;
+    const live = await r.json();
+    statsData = {
+      total_runs: live.gesendet        || 0,
+      today:      live.geantwortet     || 0,
+      active:     (live.offene_leads   || []).length,
+    };
+    liveOk = true;
+  } catch {}
+
+  if (!liveOk) {
+    try {
+      const r = await fetch('data.json');
+      const d = await r.json();
+      if (d.stats) statsData = d.stats;
+      if (d.runs)  allRuns   = d.runs;
+    } catch {}
+  }
+
+  renderHeroCards();
+  renderRecentRuns();
+  buildChart();
+  renderForecast();
+  renderVaultPulse();
+  renderAllTabs();
+}
+
+async function refreshData() {
+  console.log('[agentic-os] auto-refresh', new Date().toLocaleTimeString('de-DE'));
+  await loadData();
+}
+
+// ─── HERO CARDS ──────────────────────────────────────────
+function renderHeroCards() {
+  const { total_runs, today, active } = statsData;
+
+  document.getElementById('h-total').textContent = total_runs;
+  document.getElementById('h-today').innerHTML   = `<em>${today}</em>`;
+  document.getElementById('h-active').innerHTML  = `<em>${active}</em> online`;
+
+  const pTotal  = total_runs > 0 ? Math.min((today / total_runs) * 100 * 4, 100) : 0;
+  const pToday  = Math.min((today / 10) * 100, 100);
+  const pActive = Math.min(active * 20, 100);
+
+  document.getElementById('hb-total').style.width  = pTotal  + '%';
+  document.getElementById('hb-today').style.width  = pToday  + '%';
+  document.getElementById('hb-active').style.width = pActive + '%';
+}
+
+// ─── SKILLS ──────────────────────────────────────────────
+function renderSkills() {
+  if (!allSkills.length) {
+    document.getElementById('skillsArea').innerHTML =
+      '<div style="color:var(--fg-mute);font-size:0.75rem">Keine Skills gefunden.</div>';
+    return;
+  }
+
+  const grouped = {};
+  allSkills.forEach(s => {
+    (grouped[s.domain] = grouped[s.domain] || []).push(s);
+  });
+
+  let html = '';
+  for (const [domain, list] of Object.entries(grouped)) {
+    html += `<div class="cat-label">${esc(domain)}</div><div class="skill-grid">`;
+    list.forEach(s => {
+      html += `<button class="skill-btn" onclick="selectSkill(this,'${esc(s.name)}')">
+        <div class="skill-btn-name">${esc(s.name)}</div>
+        <div class="skill-btn-desc">${esc(s.content || '')}</div>
+      </button>`;
+    });
+    html += `</div>`;
+  }
+  document.getElementById('skillsArea').innerHTML = html;
+}
+
+function selectSkill(el, name) {
+  document.querySelectorAll('.skill-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  activeSkill = allSkills.find(s => s.name === name) || null;
+  document.getElementById('promptTa').value = activeSkill?.content || '';
+  setState('READY');
+}
+
+// ─── RUN STATE MACHINE ────────────────────────────────────
+// READY → RUNNING → COMPLETE | ERROR → READY
+async function doRun() {
+  const raw = document.getElementById('promptTa').value.trim();
+  if (!raw) {
+    setState('ERROR', null, 'Prompt ist leer');
+    return;
+  }
+
+  const prompt =
+    'Act autonomously. Do not ask for confirmation. Do not use AskUserQuestion. ' + raw;
+
+  setState('RUNNING');
+
+  try {
+    const res = await fetch('/api/run', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ prompt }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (data.status === 'started') {
+      const entry = {
+        pid:    data.pid,
+        skill:  activeSkill?.name || 'custom',
+        status: 'running',
+        time:   new Date().toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }),
+      };
+      allRuns.unshift(entry);
+      statsData.today  += 1;
+      statsData.active  = Math.max(statsData.active, 1);
+      renderHeroCards();
+      renderRecentRuns();
+      renderVaultPulse();
+      renderAllTabs();
+      setState('COMPLETE', data.pid);
+    } else {
+      setState('ERROR', null, data.message || 'Unbekannter Fehler');
+    }
+  } catch (e) {
+    setState('ERROR', null, e.message);
+  }
+}
+
+function clearRun() {
+  document.getElementById('promptTa').value = '';
+  document.querySelectorAll('.skill-btn').forEach(b => b.classList.remove('selected'));
+  activeSkill = null;
+  setState('READY');
+}
+
+function setState(state, pid = null, msg = '') {
+  const el  = document.getElementById('runStatus');
+  const btn = document.getElementById('runBtn');
+  switch (state) {
+    case 'READY':
+      el.innerHTML = '<span style="color:var(--fg-mute)">READY</span>';
+      btn.disabled = false;
+      break;
+    case 'RUNNING':
+      el.innerHTML = '<span class="pulse-dot"></span><span style="color:var(--good)">RUNNING…</span>';
+      btn.disabled = true;
+      break;
+    case 'COMPLETE':
+      el.innerHTML = `<span style="color:var(--good)">✓ COMPLETE — PID ${pid}</span>`;
+      btn.disabled = false;
+      break;
+    case 'ERROR':
+      el.innerHTML = `<span style="color:var(--bad)">✗ ERROR${msg ? ': ' + esc(msg) : ''}</span>`;
+      btn.disabled = false;
+      break;
+  }
+}
+
+// ─── SIDEBAR ─────────────────────────────────────────────
+function renderRecentRuns() {
+  const el   = document.getElementById('recentRunsList');
+  const list = allRuns.slice(0, 5);
+  if (!list.length) {
+    el.innerHTML = '<div style="color:var(--fg-dim);font-size:0.7rem">Noch keine Runs</div>';
+    return;
+  }
+  el.innerHTML = list.map(r => `
+    <div class="recent-run">
+      <span class="run-dot ${esc(r.status)}"></span>
+      <span class="run-skill">${esc(r.skill)}</span>
+      <span class="run-time">${esc(r.time)}</span>
+    </div>`).join('');
+}
+
+function buildChart() {
+  const vals = [3, 5, 2, 8, 6, 4, Math.max(statsData.today, 1)];
+  const days = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+  const W = 272, H = 70, pad = 6;
+  const maxV = Math.max(...vals, 1);
+
+  const pts = vals.map((v, i) => {
+    const x = pad + (i / (vals.length - 1)) * (W - pad * 2);
+    const y = H - pad - (v / maxV) * (H - pad * 2);
+    return [Math.round(x * 10) / 10, Math.round(y * 10) / 10];
+  });
+
+  const linePts = pts.map(p => p.join(',')).join(' ');
+  const fillPts = `${pts[0][0]},${H} ${linePts} ${pts[pts.length-1][0]},${H}`;
+
+  document.getElementById('actChart').innerHTML = `
+    <polygon points="${fillPts}" fill="rgba(249,115,22,0.08)"/>
+    <polyline points="${linePts}" fill="none"
+      stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
+    ${pts.map((p, i) => i === pts.length - 1
+      ? `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--accent)"/>`
+      : `<circle cx="${p[0]}" cy="${p[1]}" r="1.5" fill="var(--accent)" opacity="0.45"/>`
+    ).join('')}`;
+
+  document.getElementById('chartLabels').innerHTML =
+    days.map(d => `<span>${d}</span>`).join('');
+}
+
+function renderForecast() {
+  const el = document.getElementById('forecastText');
+  const { active, today, total_runs } = statsData;
+  if (active === 0 && today === 0) {
+    el.innerHTML = 'Alle Agenten pausiert.<br>Skill auswählen und starten.';
+    return;
+  }
+  const next = new Date();
+  next.setMinutes(next.getMinutes() + 30 - (next.getMinutes() % 30));
+  const t = next.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' });
+  el.innerHTML =
+    `<strong>${active}</strong> Agent${active !== 1 ? 'en' : ''} aktiv<br>` +
+    `Nächster Run: ~<strong>${t}</strong><br>` +
+    `Heute: <strong>${today}</strong> / Gesamt: <strong>${total_runs}</strong>`;
+}
+
+function renderVaultPulse() {
+  const el = document.getElementById('vaultPulseList');
+  const list = allRuns.slice(0, 6);
+  if (!list.length) {
+    el.innerHTML = '<div style="color:var(--fg-dim);font-size:0.7rem">—</div>';
+    return;
+  }
+  el.innerHTML = list.map(r => {
+    const sk  = allSkills.find(s => s.name === r.skill);
+    const tag = (sk?.domain || 'SKILL').toUpperCase();
+    return `<div class="vault-item">
+      <span class="tag">${esc(tag)}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.skill)}</span>
+      <span style="color:var(--fg-dim);font-size:0.6rem">${esc(r.time)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ─── TAB PANELS ──────────────────────────────────────────
+function renderAllTabs() {
+  renderVaultTab();
+  renderDailyNote();
+  renderRunsFolder();
+}
+
+function renderVaultTab() {
+  const tbody = document.getElementById('vaultBody');
+  const done  = allRuns.filter(r => r.status === 'completed');
+  if (!done.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--fg-dim);padding:12px 8px">
+      Noch keine abgeschlossenen Runs.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = done.map(r => {
+    const sk = allSkills.find(s => s.name === r.skill);
+    return `<tr>
+      <td>${esc(r.skill)}</td>
+      <td style="color:var(--fg-mute)">${esc(sk?.domain || '—')}</td>
+      <td style="color:var(--fg-mute)">${r.pid}</td>
+      <td><span class="sbadge completed">DONE</span></td>
+      <td style="color:var(--fg-mute)">${esc(r.time)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderDailyNote() {
+  const el = document.getElementById('dailyLog');
+  if (!allRuns.length) {
+    el.innerHTML = '<div style="color:var(--fg-dim);font-size:0.75rem;padding-top:8px">Noch keine Aktivität.</div>';
+    return;
+  }
+  el.innerHTML = allRuns.map(r => `
+    <div class="daily-entry">
+      <span class="daily-time">${esc(r.time)}</span>
+      <span>${esc(r.skill)}</span>
+      <span style="text-align:right"><span class="sbadge ${esc(r.status)}">${r.status.toUpperCase()}</span></span>
+    </div>`).join('');
+}
+
+function renderRunsFolder() {
+  const tbody = document.getElementById('runsBody');
+  if (!allRuns.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="color:var(--fg-dim);padding:12px 8px">Keine Runs.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = allRuns.map(r => `
+    <tr>
+      <td>${esc(r.skill)}</td>
+      <td style="color:var(--fg-mute)">${r.pid}</td>
+      <td><span class="sbadge ${esc(r.status)}">${r.status.toUpperCase()}</span></td>
+      <td style="color:var(--fg-mute)">${esc(r.time)}</td>
+    </tr>`).join('');
+}
+
+// ─── DRAFTS ──────────────────────────────────────────────
+function saveDraft() {
+  const text = document.getElementById('promptTa').value.trim();
+  if (!text) return;
+  drafts.unshift({
+    text,
+    skill: activeSkill?.name || null,
+    saved: new Date().toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }),
+  });
+  localStorage.setItem('agentic-os-drafts', JSON.stringify(drafts));
+  renderDrafts();
+}
+
+function loadDraft(i) {
+  const d = drafts[i];
+  if (!d) return;
+  document.getElementById('promptTa').value = d.text;
+  setTab('claude-code');
+}
+
+function deleteDraft(i, ev) {
+  ev.stopPropagation();
+  drafts.splice(i, 1);
+  localStorage.setItem('agentic-os-drafts', JSON.stringify(drafts));
+  renderDrafts();
+}
+
+function renderDrafts() {
+  const el = document.getElementById('draftsList');
+  if (!drafts.length) {
+    el.innerHTML = '<div class="empty-state">Noch keine Drafts —<br>Prompts mit 💾 speichern</div>';
+    return;
+  }
+  el.innerHTML = drafts.map((d, i) => `
+    <div class="draft-item" onclick="loadDraft(${i})">
+      <div class="draft-meta">
+        <span>${esc(d.skill || 'custom')}</span>
+        <span>${esc(d.saved)}
+          <button class="draft-del" onclick="deleteDraft(${i},event)">✕</button>
+        </span>
+      </div>
+      <div class="draft-text">${esc(d.text.slice(0, 130))}${d.text.length > 130 ? '…' : ''}</div>
+    </div>`).join('');
+}
+
+// ─── TAB SWITCHING ────────────────────────────────────────
+function setTab(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('on'));
+  const panel = document.getElementById('p-' + id);
+  const btn   = document.querySelector(`.tab-btn[data-tab="${id}"]`);
+  if (panel) panel.classList.add('on');
+  if (btn)   btn.classList.add('on');
+}
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => setTab(btn.dataset.tab));
+});
+
+// ─── UTIL ────────────────────────────────────────────────
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── START ───────────────────────────────────────────────
+init();
+
+</script>
+</body>
+</html>

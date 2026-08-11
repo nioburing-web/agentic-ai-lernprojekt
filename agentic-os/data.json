@@ -1,0 +1,17 @@
+{
+  "stats": {
+    "total_runs": 247,
+    "today": 8,
+    "active": 2
+  },
+  "runs": [
+    {"pid": 5821, "skill": "buchhalter-outreach",  "status": "completed", "time": "09:42"},
+    {"pid": 5790, "skill": "email-qualitaet",       "status": "completed", "time": "09:38"},
+    {"pid": 5744, "skill": "klassifizierung",        "status": "running",   "time": "09:21"},
+    {"pid": 5701, "skill": "reporting-qualitaet",    "status": "completed", "time": "08:55"},
+    {"pid": 5658, "skill": "vertrieb-gespraech",     "status": "completed", "time": "08:44"},
+    {"pid": 5612, "skill": "onboarding-kunde",       "status": "completed", "time": "08:30"},
+    {"pid": 5580, "skill": "buchhalter-outreach",    "status": "completed", "time": "17:55"},
+    {"pid": 5541, "skill": "klassifizierung",        "status": "completed", "time": "17:20"}
+  ]
+}
