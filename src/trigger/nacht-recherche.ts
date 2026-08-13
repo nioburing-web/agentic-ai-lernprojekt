@@ -502,6 +502,63 @@ export function nameIstGenannt(inhalt: string, firma: string): boolean {
   return kern.length >= 4 && text.includes(kern);
 }
 
+/**
+ * Wortfolge eines Textes, so weit vereinheitlicht, dass Schreibvarianten keinen
+ * Unterschied machen: Kleinschreibung, ß wie ss, alle Strich- und Anführungs-
+ * arten weg. Sonst gilt "grosser" ≠ "großer" und eine 1:1-Kopie rutscht durch.
+ */
+function wortfolge(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/ß/g, "ss")
+    .replace(/[^a-zäöü0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+}
+
+/** Längste Folge von Wörtern, die in beiden Texten identisch hintereinander steht. */
+function laengsterGemeinsamerLauf(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  let beste = 0;
+  let vorige = new Array<number>(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    const aktuell = new Array<number>(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        aktuell[j] = (vorige[j - 1] ?? 0) + 1;
+        if (aktuell[j]! > beste) beste = aktuell[j]!;
+      }
+    }
+    vorige = aktuell;
+  }
+  return beste;
+}
+
+/**
+ * Hat der Entwurf den Hook der Nische abgeschrieben, statt ihn als Kontext zu nutzen?
+ *
+ * In `nischen.ts` steht am Feld `hook` ausdrücklich "Kontext, nie wörtlich in die
+ * Mail". Die Prüfung vom 13.08.2026 zeigte, dass die Prompt-Regel das nicht hält:
+ * 9 von 60 Entwürfen begannen mit dem Hook Wort für Wort — vier Steuerkanzleien
+ * in derselben Stadt bekamen denselben ersten Satz. Bei 30 Mails pro Nacht aus
+ * derselben Absenderdomain ist das nicht nur langweilig, es ist das Muster, das
+ * am 17.07. schon die Betreffzeilen vereinheitlicht und die Open Rate auf 10%
+ * gedrückt hat.
+ *
+ * Gemessen wird die längste wörtlich übernommene Wortfolge, nicht die Ähnlichkeit
+ * insgesamt: Abschreiben zeigt sich als langer identischer Lauf, während eine
+ * echte Umformulierung dasselbe Thema trifft, ohne sieben Wörter am Stück zu
+ * teilen. Ein Ähnlichkeitsmaß über den ganzen Satz würde erlaubte Umformulierungen
+ * mitflaggen und die Prüfung damit wertlos machen.
+ */
+export function hookIstAbgeschrieben(inhalt: string, hook: string, minLauf = 7): boolean {
+  const hookWorte = wortfolge(hook);
+  const textWorte = wortfolge(inhalt);
+  if (hookWorte.length < minLauf || textWorte.length === 0) return false;
+  return laengsterGemeinsamerLauf(textWorte, hookWorte) >= minLauf;
+}
+
 export function betreffIstBrauchbar(betreff: string, verbrauchte: string[] = []): boolean {
   const kern = betreffKern(betreff);
   if (kern.length === 0) return false;
@@ -657,6 +714,29 @@ EMAIL: <email-text>`,
       console.log(`Firmenname auch im 2. Versuch nicht drin für ${firma}`);
     }
   }
+
+  // Dritte Prüfung derselben Bauart: hat das Modell den Branchen-Hinweis
+  // abgeschrieben, statt ihn als Kontext zu nutzen? Der Prompt sagt zweimal
+  // "NICHT wörtlich übernehmen" und wurde am 11./12.08. trotzdem in 9 von 60
+  // Entwürfen ignoriert. Der Nachfass nennt den Hook bewusst NICHT noch einmal —
+  // ihn zu wiederholen wäre die sicherste Art, ihn wieder abgeschrieben zu bekommen.
+  if (hookIstAbgeschrieben(ergebnis.inhalt, branchenHinweis)) {
+    console.log(`Hook wörtlich übernommen – Neuversuch für ${firma}`);
+    const nachgefasst = await erzeuge(
+      `Ein Satz der Mail ist Wort für Wort aus dem Hintergrundwissen zur Branche abgeschrieben. Genau das darf nicht passieren — dieselbe Zeile geht heute Nacht an dutzende weitere Betriebe derselben Branche. Gib denselben Betreff und dieselbe Mail erneut aus, aber formuliere den Satz zur Reibung komplett neu: andere Wörter, anderer Satzbau, gern aus Sicht von ${firma} statt allgemein über die Branche. Sonst nichts ändern. Wieder im Format BETREFF: / EMAIL:.`
+    );
+    // Nur übernehmen, wenn der zweite Versuch das Problem wirklich löst — und
+    // dabei nicht den Firmennamen verliert, den der Schritt davor gerettet hat.
+    if (
+      !hookIstAbgeschrieben(nachgefasst.inhalt, branchenHinweis) &&
+      nameIstGenannt(nachgefasst.inhalt, firma)
+    ) {
+      ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
+    } else {
+      console.log(`Hook auch im 2. Versuch übernommen für ${firma}`);
+    }
+  }
+
   return ergebnis;
 }
 
