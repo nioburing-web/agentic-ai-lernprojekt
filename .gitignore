@@ -32,3 +32,9 @@ buchhalter-agent/node_modules/
 
 # Playwright-MCP Debug-Artefakte (ephemer, nie committen)
 .playwright-mcp/
+
+# Zwischenstaende von tools/neu-generieren.ts: alte Fassung und Probelauf-Ergebnis.
+# Enthalten Volltext, Firmennamen und E-Mail-Adressen echter Leads — Kundenmaterial,
+# und ausserdem erzeugter Output, kein Quelltext.
+tools/.backup-entwuerfe.json
+tools/.neue-entwuerfe.json
