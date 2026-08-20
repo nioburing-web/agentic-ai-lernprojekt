@@ -559,6 +559,82 @@ export function hookIstAbgeschrieben(inhalt: string, hook: string, minLauf = 7):
   return laengsterGemeinsamerLauf(textWorte, hookWorte) >= minLauf;
 }
 
+// Dateiendungen, die als Domain auftauchen, wenn der Scraper einen Bild- oder
+// Asset-Pfad fuer eine Adresse haelt. Echter Fund vom 17.08.2026: `de-de@2x.png`
+// (ein Retina-Bildname) stand als Kontakt in der Queue.
+const DATEI_ENDUNGEN = [
+  "png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp", "avif",
+  "css", "js", "json", "pdf", "woff", "woff2", "ttf", "eot", "mp4", "webm",
+];
+
+// Postfaecher, die nie ein Entscheider liest. `job@` und `bewerbung@` landen bei
+// der Personalstelle, `noreply@` bei niemandem.
+const UNBRAUCHBARE_PREFIXES = [
+  "job", "jobs", "bewerbung", "bewerbungen", "karriere", "career", "careers",
+  "recruiting", "personal", "ausbildung", "praktikum",
+  "noreply", "no-reply", "donotreply", "do-not-reply",
+  "postmaster", "abuse", "spam", "mailer-daemon",
+];
+
+// Fremde Absender: Software- und Buchungsplattformen, deren Adresse auf der Seite
+// des Betriebs steht, ohne dem Betrieb zu gehoeren. Fund vom 17.08.2026:
+// `service@studiolution.com` fuer "atelier stilwerk" — das ist die Salon-Software.
+// Die Liste waechst, wenn ein Fall auftaucht. Sie raet nichts.
+const FREMD_DOMAINS = [
+  "studiolution.com", "shore.com", "treatwell.de", "treatwell.com",
+  "planity.com", "phorest.com", "salonkee.de", "doctolib.de",
+  "jameda.de", "samedi.de", "dr-flex.de", "terminland.de",
+  "wixpress.com", "sentry.io", "example.com", "domain.de",
+];
+
+/**
+ * Prueft, ob eine gefundene Adresse ueberhaupt zum Anschreiben taugt.
+ * Gibt den Grund zurueck, wenn nicht, sonst `null`.
+ *
+ * Warum es diese Pruefung gibt (17.08.2026): der Quality-Gate prueft Betreff,
+ * Firmenname und Hook — also den **Text**. Die **Adresse** hat nie jemand geprueft.
+ * Bei der Freigabe von 72 Zeilen fielen 4 durch, alle wegen der Adresse: ein
+ * Bilddateiname, ein Bewerbungspostfach, eine Salon-Software und ein Sportverein.
+ * Das sind rund 6 %, die als GESENDET in die Statistik gehen und die Reply-Rate
+ * still verduennen — derselbe Mechanismus wie beim Spalten-Bug und der
+ * Betreff-Monokultur: der Fehler liegt **vor** der Messung.
+ *
+ * Bewusst deterministisch und bewusst unvollstaendig. Die zwei Faelle, die ein
+ * Urteil brauchen (passt der Betrieb ueberhaupt zum Angebot, gehoert die Domain
+ * zum Namen), bleiben draussen — eine geratene Regel dafuer wuerde echte Leads
+ * verwerfen, und ein stiller Fehlalarm ist teurer als eine verschwendete Mail.
+ */
+export function adresseIstUnbrauchbar(email: string): string | null {
+  const adresse = email.trim().toLowerCase();
+
+  if (!adresse) return "leer";
+  if (/\s/.test(adresse)) return "enthaelt Leerzeichen";
+
+  const teile = adresse.split("@");
+  if (teile.length !== 2) return "kein einzelnes @";
+
+  const [lokal, domain] = teile as [string, string];
+  if (!lokal) return "kein lokaler Teil";
+  if (!domain.includes(".")) return "Domain ohne Punkt";
+
+  const endung = domain.split(".").pop() ?? "";
+  if (DATEI_ENDUNGEN.includes(endung)) return `Dateiendung als Domain (.${endung})`;
+
+  // Zwei Vergleiche, weil beide Schreibweisen vorkommen: der ganze lokale Teil
+  // faengt `no-reply@`, der erste Namensteil faengt `job.mueller@`. Nur den ersten
+  // Teil zu pruefen liesse `no-reply@` durch (es wuerde zu "no"), nur den ganzen
+  // liesse `job.mueller@` durch. `jobst@` bleibt bei beiden Wegen unberuehrt.
+  const ersterTeil = lokal.split(/[.\-_+]/)[0] ?? "";
+  const treffer = [lokal, ersterTeil].find((kandidat) => UNBRAUCHBARE_PREFIXES.includes(kandidat));
+  if (treffer) return `Postfach "${treffer}@" liest kein Entscheider`;
+
+  if (FREMD_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`))) {
+    return `Fremde Domain (${domain}) — gehoert nicht dem Betrieb`;
+  }
+
+  return null;
+}
+
 export function betreffIstBrauchbar(betreff: string, verbrauchte: string[] = []): boolean {
   const kern = betreffKern(betreff);
   if (kern.length === 0) return false;
@@ -875,6 +951,14 @@ export const nachtRecherche = schedules.task({
 
               const email = await findeEmailAufWebsite(website);
               if (!email) continue;
+
+              // Adress-Pruefung vor Website-Text und LLM: ein unbrauchbarer Kontakt
+              // soll weder einen Fetch noch einen API-Call kosten.
+              const adressGrund = adresseIstUnbrauchbar(email);
+              if (adressGrund) {
+                console.log(`Adresse unbrauchbar (${adressGrund}): ${firma.name} → ${email} – übersprungen`);
+                continue;
+              }
 
               const emailDomain = email.split("@")[1]?.toLowerCase() ?? "";
               if (IGNORIERTE_DOMAINS.some(d => emailDomain.includes(d) || firma.name?.toLowerCase().includes(d))) {
