@@ -30,6 +30,58 @@ const LOOKBACK_MIN_DEFAULT = 65;
 
 type MonitorPayload = { lookbackMin?: number } | undefined;
 
+// Was runs.retrieve() im error-Feld liefert (@trigger.dev/core 4.4.4).
+// runs.list() liefert dieses Feld NICHT — siehe fehlertextAus().
+type RunFehlerDetail = { message?: string; name?: string; stackTrace?: string } | undefined;
+
+const KEIN_FEHLERTEXT = "Kein Fehlertext im Run";
+
+// Erste Zeile im Stacktrace, die auf EIGENEN Code zeigt. Ohne das nennt die
+// Alarm-Mail gaxios oder google-auth-library als Fundort — technisch richtig
+// und zum Handeln nutzlos.
+function ersteCodeStelle(stackTrace?: string): string | null {
+  if (!stackTrace) return null;
+  const zeilen = stackTrace
+    .split(/\r?\n/)
+    .map((z) => z.trim())
+    .filter((z) => z.startsWith("at "));
+  if (zeilen.length === 0) return null;
+
+  const eigene = zeilen.find((z) => !z.includes("node_modules") && z.includes("/src/")) ?? zeilen[0];
+
+  // "at sicherQueueTab (file:///src/trigger/nacht-recherche.ts:70:20)"
+  //   → "sicherQueueTab (nacht-recherche.ts:70)"
+  const teile = eigene.match(/^at\s+(.+?)\s+\((.*)\)$/);
+  if (!teile) return eigene.replace(/^at\s+/, "").slice(0, 120);
+
+  const ort = teile[2]
+    .replace(/^file:\/\/\//, "")
+    .replace(/^.*\//, "")
+    .replace(/:(\d+):\d+$/, ":$1");
+  return `${teile[1]} (${ort})`;
+}
+
+// Baut aus dem error-Objekt eines Runs eine Zeile, die allein zum Einordnen
+// reicht — ohne dass man das Dashboard öffnen muss.
+//
+// Exportiert, damit tests/test_health_monitor.ts sie ohne Netzwerk prüfen kann.
+export function fehlertextAus(error: RunFehlerDetail): string {
+  const message = error?.message?.trim() ?? "";
+  const name = error?.name?.trim() ?? "";
+
+  let basis = message || name;
+  if (!basis) return KEIN_FEHLERTEXT;
+
+  // "Error" trägt nichts bei, ein "QuotaError" schon.
+  if (name && name !== "Error" && basis !== name && !basis.startsWith(name)) {
+    basis = `${name}: ${basis}`;
+  }
+  basis = basis.replace(/\s+/g, " ").slice(0, 300);
+
+  const stelle = ersteCodeStelle(error?.stackTrace);
+  return stelle ? `${basis} | bei ${stelle}` : basis;
+}
+
 type FehlerRun = {
   taskId: string;
   status: string;
@@ -54,14 +106,25 @@ async function sammleFehler(lookbackMin: number): Promise<FehlerRun[]> {
     const zeit = (run.finishedAt ?? run.createdAt ?? new Date()).toLocaleString("de-DE", {
       timeZone: "Europe/Berlin",
     });
-    const fehler = run.error?.message ?? run.error?.name ?? "Kein Fehlertext im Run";
+    // runs.list() liefert kein error-Feld — die Details muss man nachladen.
+    // Fail-open: schlägt das Nachladen fehl, geht der Alarm trotzdem raus.
+    let detail: RunFehlerDetail;
+    try {
+      detail = (await runs.retrieve(run.id)).error;
+    } catch (e) {
+      logger.warn("Fehlerdetails nicht abrufbar — Alarm geht trotzdem raus", {
+        runId: run.id,
+        grund: String(e).slice(0, 200),
+      });
+    }
+    const fehler = fehlertextAus(detail);
 
     treffer.push({
       taskId: run.taskIdentifier,
       status: run.status,
       runId: run.id,
       zeit,
-      fehler: String(fehler).slice(0, 300),
+      fehler,
     });
   }
 
