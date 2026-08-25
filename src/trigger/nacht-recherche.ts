@@ -242,8 +242,10 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
   if (!baseUrl.startsWith("http")) baseUrl = "https://" + websiteUrl;
   baseUrl = baseUrl.replace(/\/$/, "");
 
-  let domain: string;
-  try { domain = new URL(baseUrl).hostname.replace("www.", ""); }
+  // Nur die Gueltigkeit pruefen. Der Domain-Vergleich selbst liegt in
+  // `emailPasstZurWebsite`, damit es genau eine Stelle gibt, die entscheidet,
+  // ob eine Adresse zum Betrieb gehoert.
+  try { new URL(baseUrl); }
   catch { return null; }
 
   const fetchSeite = async (url: string): Promise<string | null> => {
@@ -259,11 +261,16 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
     } catch { return null; }
   };
 
-  const pruefEmail = (email: string, nurDomain = false): boolean => {
+  // Die Domain-Passung gilt jetzt auf JEDEM Weg, auch im Impressum. Vorher war
+  // sie nur auf Start- und Kontaktseite scharf — und genau das war das Loch:
+  // im Impressum stehen die Agentur, die die Seite gebaut hat, und der externe
+  // Datenschutzbeauftragte. Alle vier Fehlzuordnungen vom 25.08.2026 sind ueber
+  // diesen Zweig hereingekommen (Z1186, Z1229, Z1241, Z1266).
+  const pruefEmail = (email: string): boolean => {
     if (!email.includes("@")) return false;
     const prefix = email.split("@")[0];
     if (IGNORIERTE_PREFIXES.has(prefix)) return false;
-    if (nurDomain && !email.includes(`@${domain}`) && !email.includes(`@www.${domain}`)) return false;
+    if (emailPasstZurWebsite(email, baseUrl) !== null) return false;
     return true;
   };
 
@@ -281,7 +288,7 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
     const inhalt = seite === baseUrl ? startseite : await fetchSeite(seite);
     if (!inhalt) continue;
     for (const email of extrahiereEmails(inhalt)) {
-      if (!pruefEmail(email, true)) continue;
+      if (!pruefEmail(email)) continue;
       const prefix = email.split("@")[0];
       if (BEVORZUGTE_PREFIXES.has(prefix)) return email;
       alleEmails.push(email);
@@ -291,7 +298,7 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
   const impressumInhalt = await fetchSeite(impressumUrl);
   if (impressumInhalt) {
     for (const email of extrahiereEmails(impressumInhalt)) {
-      if (!pruefEmail(email, false)) continue;
+      if (!pruefEmail(email)) continue;
       const prefix = email.split("@")[0];
       if (BEVORZUGTE_PREFIXES.has(prefix)) return email;
       alleEmails.push(email);
@@ -299,7 +306,7 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
   }
 
   for (const email of [...new Set(alleEmails)]) {
-    if (pruefEmail(email, false)) return email;
+    if (pruefEmail(email)) return email;
   }
   return null;
 }
@@ -580,6 +587,21 @@ const UNBRAUCHBARE_PREFIXES = [
 // des Betriebs steht, ohne dem Betrieb zu gehoeren. Fund vom 17.08.2026:
 // `service@studiolution.com` fuer "atelier stilwerk" — das ist die Salon-Software.
 // Die Liste waechst, wenn ein Fall auftaucht. Sie raet nichts.
+// Echte Freemail-Anbieter. Ein Kleinbetrieb, der seine Post ueber t-online oder
+// gmx fuehrt, ist voellig normal — diese Adressen duerfen NICHT an der
+// Domain-Pruefung scheitern, sonst kostet der Filter mehr Leads als er rettet.
+const FREIMAIL_PROVIDER = [
+  "t-online.de", "gmx.de", "gmx.net", "gmx.at", "gmx.ch", "web.de",
+  "gmail.com", "googlemail.com", "outlook.de", "outlook.com", "hotmail.de",
+  "hotmail.com", "live.de", "yahoo.de", "yahoo.com", "freenet.de", "aol.com",
+  "icloud.com", "me.com", "mail.de", "posteo.de", "arcor.de", "online.de",
+  "vodafone.de", "bluewin.ch", "a1.net",
+];
+
+// Zweiteilige oeffentliche Suffixe. Ohne die wuerde `firma.co.uk` auf `co.uk`
+// zusammenfallen und jede britische Domain zur selben Firma gehoeren.
+const ZWEITEILIGE_SUFFIXE = ["co.uk", "org.uk", "ac.uk", "com.au", "co.nz", "com.br"];
+
 const FREMD_DOMAINS = [
   "studiolution.com", "shore.com", "treatwell.de", "treatwell.com",
   "planity.com", "phorest.com", "salonkee.de", "doctolib.de",
@@ -633,6 +655,69 @@ export function adresseIstUnbrauchbar(email: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Reduziert einen Hostnamen auf die registrierbare Domain: `www.mail.firma.de`
+ * wird zu `firma.de`. Gibt `null` zurueck, wenn nichts Verwertbares drinsteht.
+ */
+function registrierbareDomain(hostOderUrl: string): string | null {
+  let host = (hostOderUrl || "").trim().toLowerCase();
+  if (!host) return null;
+
+  if (host.includes("://") || host.includes("/")) {
+    try {
+      host = new URL(host.startsWith("http") ? host : `https://${host}`).hostname;
+    } catch {
+      return null;
+    }
+  }
+
+  host = host.replace(/^www\./, "").replace(/\.$/, "");
+  if (!host.includes(".") || /\s/.test(host)) return null;
+
+  const labels = host.split(".").filter(Boolean);
+  if (labels.length < 2) return null;
+
+  const letzteZwei = labels.slice(-2).join(".");
+  if (ZWEITEILIGE_SUFFIXE.includes(letzteZwei) && labels.length >= 3) {
+    return labels.slice(-3).join(".");
+  }
+  return letzteZwei;
+}
+
+/**
+ * Prueft, ob eine auf `websiteUrl` gefundene Adresse ueberhaupt dem Betrieb
+ * gehoert, dem diese Website gehoert. Gibt den Grund zurueck, wenn nicht,
+ * sonst `null`.
+ *
+ * Warum es diese Pruefung gibt (25.08.2026): bei der Freigabe von 92 Zeilen
+ * fielen 4 durch, alle aus derselben Klasse — die Adresse war syntaktisch
+ * einwandfrei und stand auf keiner Sperrliste, gehoerte aber einem Dritten:
+ * der Werbeagentur aus dem Impressum, einer Marketing-Agentur fuer Kanzleien
+ * (also dem Wettbewerb), dem Datenschutzbeauftragten von WordPress.org.
+ * `adresseIstUnbrauchbar` kann das nicht sehen — der einzige Unterschied zu
+ * einer echten Adresse ist, dass die Domain nicht zur Website passt.
+ *
+ * Bewusst NICHT verworfen wird Freemail: ein Betrieb mit `@t-online.de` ist
+ * echt, nur schlecht organisiert. Und ist die Website unlesbar, wird nicht
+ * geraten — ohne Vergleichsgroesse gibt es kein Urteil.
+ */
+export function emailPasstZurWebsite(email: string, websiteUrl: string): string | null {
+  const adresse = (email || "").trim().toLowerCase();
+  if (!adresse.includes("@")) return "keine Adresse";
+
+  const mailHost = adresse.split("@")[1] ?? "";
+  const mailDomain = registrierbareDomain(mailHost);
+  if (!mailDomain) return "Domain nicht lesbar";
+
+  const seitenDomain = registrierbareDomain(websiteUrl);
+  if (!seitenDomain) return null; // ohne Vergleichsgroesse kein Urteil
+
+  if (mailDomain === seitenDomain) return null;
+  if (FREIMAIL_PROVIDER.includes(mailDomain)) return null;
+
+  return `Fremde Domain (${mailDomain}) passt nicht zur Website (${seitenDomain})`;
 }
 
 export function betreffIstBrauchbar(betreff: string, verbrauchte: string[] = []): boolean {
