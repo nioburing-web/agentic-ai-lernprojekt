@@ -248,5 +248,10 @@ export const morgenVersand = schedules.task({
     }
 
     console.log("=== Morgen-Versand fertig ===");
+
+    // Das Ergebnis verlaesst den Lauf, statt nur im Log zu stehen. Der
+    // agent-health-monitor liest es und schlaegt Alarm, wenn ein gruener Lauf
+    // nichts bewirkt hat (25.08.2026: 0 von 0 gesendet, kein Alarm, kein Outreach).
+    return { gefunden: emailRows.length, gesendet: emailGesendet, fehler: fehler.length };
   },
 });

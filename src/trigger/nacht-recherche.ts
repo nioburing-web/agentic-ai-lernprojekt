@@ -1116,5 +1116,9 @@ export const nachtRecherche = schedules.task({
     console.log(
       `=== Nacht-Recherche fertig: ${emailGespeichert} Entwürfe (${kategorie.label}, Status ${draftStatus}) ===`
     );
+
+    // Siehe morgen-versand: die WARNUNG oben stand bisher nur im Log. Als
+    // Rueckgabe kann der agent-health-monitor sie lesen und melden.
+    return { entwuerfe: emailGespeichert, kategorie: kategorie.label, status: draftStatus };
   },
 });

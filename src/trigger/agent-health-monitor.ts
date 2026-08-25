@@ -82,7 +82,83 @@ export function fehlertextAus(error: RunFehlerDetail): string {
   return stelle ? `${basis} | bei ${stelle}` : basis;
 }
 
-type FehlerRun = {
+// ─── Leerlauf: grün gelaufen, nichts getan ────────────────────────────────────
+//
+// Warum es das gibt (25.08.2026): `morgen-versand` lief um 09:00 durch, meldete
+// `completed` nach 1,5 Sekunden und sendete 0 von 0 Mails. Kein Fehler, kein
+// Alarm, kein Outreach. `sammleFehler` kann das nicht sehen — ein Lauf, der
+// nichts zu tun findet, endet per Definition mit Erfolg.
+//
+// Dasselbe Muster gab es schon zweimal: Maps-Billing aus (06.07.), Sheets-
+// Spalten-Bug (16.07.). Beide Male stand die Zahl im Log, beide Male hat sie
+// niemand gelesen. Die Tasks WISSEN, dass sie leerliefen — `nacht-recherche`
+// schreibt sogar "WARNUNG: 0 Entwürfe". Nur gab `run()` `undefined` zurück,
+// also verliess das Wissen den Lauf nie. Deshalb geben die ueberwachten Tasks
+// jetzt ein Ergebnis zurueck, und hier wird es gelesen.
+//
+// Bewusst NICHT ueberwacht: `nachfass-versand` (0 faellige Leads ist ein
+// normaler Tag) und `linkedin-api-posting` (Stub ohne Token, gewollt still).
+// Ein Waechter, der an ruhigen Tagen schreit, wird genauso ignoriert wie einer,
+// der schweigt.
+
+const UEBERWACHTE_TASKS = ["morgen-versand", "nacht-recherche"] as const;
+
+function zahl(ausgabe: unknown, feld: string): number | null {
+  if (typeof ausgabe !== "object" || ausgabe === null) return null;
+  const wert = (ausgabe as Record<string, unknown>)[feld];
+  return typeof wert === "number" && Number.isFinite(wert) ? wert : null;
+}
+
+/**
+ * Urteilt ueber die Ausgabe eines erfolgreich beendeten Laufs: hat er
+ * tatsaechlich etwas getan? Gibt den Befund zurueck, wenn nicht, sonst `null`.
+ *
+ * Eine fehlende oder unerwartete Ausgabe wird **gemeldet**, nicht verschluckt.
+ * Sonst waere ausgerechnet der Fall unsichtbar, in dem jemand das `return` aus
+ * einer Task entfernt — also genau der Fehler, den diese Pruefung abfangen soll.
+ *
+ * Exportiert, damit tests/test_leerlauf.ts sie ohne Netzwerk pruefen kann.
+ */
+export function leerlaufBefund(taskId: string, ausgabe: unknown): string | null {
+  if (!(UEBERWACHTE_TASKS as readonly string[]).includes(taskId)) return null;
+
+  if (taskId === "morgen-versand") {
+    const gefunden = zahl(ausgabe, "gefunden");
+    const gesendet = zahl(ausgabe, "gesendet");
+    if (gefunden === null || gesendet === null) {
+      return "Lauf meldet kein verwertbares Ergebnis (gefunden/gesendet fehlen) — laeuft hier noch eine alte Version?";
+    }
+    if (gefunden === 0) {
+      return "0 freigegebene Entwuerfe in der Queue — es ging keine einzige Mail raus. Queue auf DRAFT pruefen.";
+    }
+    if (gesendet === 0) {
+      return `${gefunden} Entwuerfe gefunden, aber 0 gesendet — jeder Sendeversuch ist gescheitert (Brevo?).`;
+    }
+    return null;
+  }
+
+  if (taskId === "nacht-recherche") {
+    const entwuerfe = zahl(ausgabe, "entwuerfe");
+    if (entwuerfe === null) {
+      return "Lauf meldet kein verwertbares Ergebnis (entwuerfe fehlt) — laeuft hier noch eine alte Version?";
+    }
+    if (entwuerfe === 0) {
+      return "0 neue Entwuerfe — Pool erschoepft, Maps-Billing aus oder Quality-Gate zu streng.";
+    }
+    return null;
+  }
+
+  return null;
+}
+
+export type LeerlaufRun = {
+  taskId: string;
+  runId: string;
+  zeit: string;
+  befund: string;
+};
+
+export type FehlerRun = {
   taskId: string;
   status: string;
   runId: string;
@@ -132,26 +208,101 @@ async function sammleFehler(lookbackMin: number): Promise<FehlerRun[]> {
   return treffer;
 }
 
+// ─── Schritt 1b: Leerlauf sammeln ─────────────────────────────────────────────
+
+async function sammleLeerlauf(lookbackMin: number): Promise<LeerlaufRun[]> {
+  const seit = new Date(Date.now() - lookbackMin * 60_000);
+  const treffer: LeerlaufRun[] = [];
+
+  for await (const run of runs.list({ status: ["COMPLETED"], from: seit, limit: 50 })) {
+    if (!(UEBERWACHTE_TASKS as readonly string[]).includes(run.taskIdentifier)) continue;
+
+    let ausgabe: unknown;
+    try {
+      ausgabe = (await runs.retrieve(run.id)).output;
+    } catch (e) {
+      // Ohne Ausgabe gibt es kein Urteil. Melden statt raten — sonst ist die
+      // Pruefung genau dann still, wenn die API klemmt.
+      logger.warn("Ausgabe nicht abrufbar — Lauf nicht beurteilt", {
+        runId: run.id,
+        taskId: run.taskIdentifier,
+        grund: String(e).slice(0, 200),
+      });
+      continue;
+    }
+
+    const befund = leerlaufBefund(run.taskIdentifier, ausgabe);
+    if (!befund) continue;
+
+    treffer.push({
+      taskId: run.taskIdentifier,
+      runId: run.id,
+      zeit: (run.finishedAt ?? run.createdAt ?? new Date()).toLocaleString("de-DE", {
+        timeZone: "Europe/Berlin",
+      }),
+      befund,
+    });
+  }
+
+  logger.log("Schritt 1b abgeschlossen", { gefundenerLeerlauf: treffer.length });
+  return treffer;
+}
+
 // ─── Schritt 2: Alarm-Mail bauen ──────────────────────────────────────────────
 
-function baueAlarm(fehler: FehlerRun[], lookbackMin: number): { betreff: string; text: string } {
-  const betreff = `⚠️ Agent-Ausfall: ${fehler.length} Task${fehler.length === 1 ? "" : "s"} down`;
+// Exportiert, damit tests/test_leerlauf.ts den fertigen Mail-Text pruefen kann.
+// Der Text IST das Produkt dieser Task — ein gruener Unit-Test ueber der
+// Urteilsfunktion belegt nichts ueber die Mail, die am Ende ankommt.
+export function baueAlarm(
+  fehler: FehlerRun[],
+  leerlauf: LeerlaufRun[],
+  lookbackMin: number
+): { betreff: string; text: string } {
+  // Der Betreff muss allein schon sagen, was los ist — die Mail wird sonst
+  // aufgeschoben. Belegt: drei Alarm-Mails in vierzehn Tagen blieben ungelesen.
+  const teile: string[] = [];
+  if (fehler.length > 0) teile.push(`${fehler.length} Task${fehler.length === 1 ? "" : "s"} down`);
+  if (leerlauf.length > 0) teile.push(`${leerlauf.length}x Leerlauf`);
+  const betreff = `⚠️ Agent-Alarm: ${teile.join(", ")}`;
 
-  const bloecke = fehler
-    .map(
-      (f) =>
-        `▸ ${f.taskId}  [${f.status}]\n` +
-        `  Zeit:  ${f.zeit}\n` +
-        `  Run:   ${f.runId}\n` +
-        `  Fehler: ${f.fehler}`
-    )
-    .join("\n\n");
+  const abschnitte: string[] = [];
+
+  if (fehler.length > 0) {
+    const bloecke = fehler
+      .map(
+        (f) =>
+          `▸ ${f.taskId}  [${f.status}]\n` +
+          `  Zeit:  ${f.zeit}\n` +
+          `  Run:   ${f.runId}\n` +
+          `  Fehler: ${f.fehler}`
+      )
+      .join("\n\n");
+    abschnitte.push(
+      `${fehler.length} fehlgeschlagene${fehler.length === 1 ? "r Run" : " Runs"} in den letzten ${lookbackMin} Minuten:\n\n${bloecke}`
+    );
+  }
+
+  if (leerlauf.length > 0) {
+    const bloecke = leerlauf
+      .map(
+        (l) =>
+          `▸ ${l.taskId}  [gruen gelaufen, nichts getan]\n` +
+          `  Zeit:  ${l.zeit}\n` +
+          `  Run:   ${l.runId}\n` +
+          `  Befund: ${l.befund}`
+      )
+      .join("\n\n");
+    abschnitte.push(
+      `${leerlauf.length} Lauf${leerlauf.length === 1 ? "" : "e"} mit Erfolg beendet, aber ohne Wirkung:\n\n${bloecke}\n\n` +
+        `Diese Klasse faellt NICHT als Fehler auf. Genau so blieben der Maps-Billing-\n` +
+        `Ausfall (06.07.) und der Sheets-Spalten-Bug (16.07.) tagelang unbemerkt.`
+    );
+  }
 
   const text =
-    `=== AGENT-AUSFALL-FRÜHWARNUNG ===\n\n` +
-    `${fehler.length} fehlgeschlagene${fehler.length === 1 ? "r Run" : " Runs"} in den letzten ${lookbackMin} Minuten:\n\n` +
-    `${bloecke}\n\n` +
-    `Im Trigger.dev-Dashboard öffnen → Run-ID suchen → Logs prüfen.`;
+    `=== AGENT-ALARM ===\n\n` +
+    `${abschnitte.join("\n\n---\n\n")}\n\n` +
+    `Im Trigger.dev-Dashboard oeffnen → Run-ID suchen → Logs pruefen.`;
 
   return { betreff, text };
 }
@@ -196,17 +347,26 @@ export const agentHealthMonitor = schedules.task({
     logger.log("Agent-Health-Monitor gestartet", { lookbackMin });
 
     const fehler = await sammleFehler(lookbackMin);
+    const leerlauf = await sammleLeerlauf(lookbackMin);
 
-    // Decision Point: keine Fehler → still bleiben, kein Lärm
-    if (fehler.length === 0) {
+    // Decision Point: nichts gefunden → still bleiben, kein Lärm
+    if (fehler.length === 0 && leerlauf.length === 0) {
       logger.log("Alles grün — kein Alarm");
-      return { status: "ok", fehler: 0 };
+      return { status: "ok", fehler: 0, leerlauf: 0 };
     }
 
-    const { betreff, text } = baueAlarm(fehler, lookbackMin);
+    const { betreff, text } = baueAlarm(fehler, leerlauf, lookbackMin);
     await sendeAlarm(betreff, text);
 
-    logger.log("Agent-Health-Monitor abgeschlossen", { gemeldet: fehler.length });
-    return { status: "alert", fehler: fehler.length, tasks: fehler.map((f) => f.taskId) };
+    logger.log("Agent-Health-Monitor abgeschlossen", {
+      gemeldeteFehler: fehler.length,
+      gemeldeterLeerlauf: leerlauf.length,
+    });
+    return {
+      status: "alert",
+      fehler: fehler.length,
+      leerlauf: leerlauf.length,
+      tasks: [...fehler.map((f) => f.taskId), ...leerlauf.map((l) => l.taskId)],
+    };
   },
 });
