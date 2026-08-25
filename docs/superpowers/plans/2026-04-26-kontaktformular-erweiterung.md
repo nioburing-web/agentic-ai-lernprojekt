@@ -1,5 +1,13 @@
 # Kontaktformular-Erweiterung Implementation Plan
 
+> ⚠️ **HISTORISCH — nicht mehr umsetzbar (Stand 25.08.2026).** Dieser Plan bezieht sich
+> auf `src/trigger/buchhalter-outreach.ts` und `tests/test_buchhalter_outreach.ts`.
+> Beide Dateien gibt es nicht mehr: der Agent war der Vorgänger von `nacht-recherche.ts`,
+> wurde in `0d5eb6c` aus dem Betrieb genommen und am 25.08.2026 entfernt, weil er eine
+> zweite, nie mitgepflegte Kopie von `findeEmailAufWebsite` enthielt. Die
+> `fuellKontaktformular`-Implementierung aus `213faea` ist über die Git-Historie
+> erreichbar. Als Vorlage lesen, nicht als offene Aufgabe.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Den Buchhalter-Outreach-Agent um Kontaktformular-Unterstützung erweitern — er erkennt automatisch ob eine Firma eine direkte E-Mail oder ein Kontaktformular hat und handelt entsprechend.
