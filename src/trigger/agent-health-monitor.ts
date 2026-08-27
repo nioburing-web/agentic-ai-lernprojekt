@@ -138,6 +138,14 @@ export function leerlaufBefund(taskId: string, ausgabe: unknown): string | null 
   }
 
   if (taskId === "nacht-recherche") {
+    // Ein absichtlich uebersprungener Lauf ist kein Leerlauf. Seit 27.08.2026
+    // bremst `nacht-recherche` selbst, wenn zu viele Entwuerfe unbearbeitet auf
+    // PRUEFEN liegen, und legt den Grund in `uebersprungen` ab. Ohne diese
+    // Unterscheidung meldete der Monitor jede gebremste Nacht als "Pool
+    // erschoepft" — also genau dann Alarm, wenn alles richtig laeuft.
+    const uebersprungen = (ausgabe as Record<string, unknown> | null)?.["uebersprungen"];
+    if (typeof uebersprungen === "string" && uebersprungen.trim() !== "") return null;
+
     const entwuerfe = zahl(ausgabe, "entwuerfe");
     if (entwuerfe === null) {
       return "Lauf meldet kein verwertbares Ergebnis (entwuerfe fehlt) — laeuft hier noch eine alte Version?";

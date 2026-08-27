@@ -93,6 +93,37 @@ check(beides.text.includes("Kie.ai") && beides.text.includes("0 freigegebene"),
   "Mail-Text traegt beide Abschnitte");
 check(beides.text.includes("---"), "Trenner zwischen den beiden Abschnitten");
 
+// ─── Gebremste Nacht ist kein Leerlauf (27.08.2026) ──────────────────────────
+//
+// nacht-recherche bremst sich selbst, wenn zu viele Entwürfe unbearbeitet auf
+// PRUEFEN liegen. Sie meldet dann 0 Entwürfe — aber mit Grund. Ohne diese
+// Unterscheidung hätte der Monitor jede gebremste Nacht als "Pool erschöpft"
+// gemeldet, also genau dann Alarm gegeben, wenn alles richtig läuft.
+
+check(
+  leerlaufBefund("nacht-recherche", {
+    entwuerfe: 0, kategorie: "-", status: "-",
+    uebersprungen: "72 Entwuerfe stehen auf PRUEFEN (Grenze 60)",
+  }) === null,
+  "gebremste Nacht (uebersprungen gesetzt) löst KEINEN Alarm aus",
+);
+check(
+  leerlaufBefund("nacht-recherche", { entwuerfe: 0 }) !== null,
+  "0 Entwürfe OHNE Grund löst weiterhin Alarm aus",
+);
+check(
+  leerlaufBefund("nacht-recherche", { entwuerfe: 0, uebersprungen: "" }) !== null,
+  "leerer Grund zählt nicht als übersprungen",
+);
+check(
+  leerlaufBefund("nacht-recherche", { entwuerfe: 0, uebersprungen: 42 }) !== null,
+  "Grund muss ein Text sein, keine Zahl",
+);
+check(
+  leerlaufBefund("nacht-recherche", { entwuerfe: 30, kategorie: "x", status: "PRUEFEN" }) === null,
+  "normale Nacht mit 30 Entwürfen bleibt still",
+);
+
 const nurFehler = baueAlarm(beispielFehler, [], 65);
 check(nurFehler.betreff.includes("1 Task down") && !nurFehler.betreff.includes("Leerlauf"),
   `Betreff ohne Leerlauf-Teil: "${nurFehler.betreff}"`);

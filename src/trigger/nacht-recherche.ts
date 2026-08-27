@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { schedules, wait } from "@trigger.dev/sdk";
+import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
+import { saubererBetriebsname, oeffnerIstFloskel } from "./entwurf-qualitaet";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import OpenAI from "openai";
@@ -100,6 +102,28 @@ async function sicherQueueTab(sheets: ReturnType<typeof googleSheets>, sheetId: 
       requestBody: { values: [["Demo-ID", "Demo geklickt", "Nische", "Kategorie"]] },
     });
   }
+}
+
+/**
+ * Obergrenze fuer unbearbeitete Entwuerfe. Zwei volle Versandtage (30/Tag) sind
+ * ein gesunder Vorrat; alles darueber ist Stau, nicht Puffer.
+ */
+export const PRUEFEN_OBERGRENZE = 60;
+
+/**
+ * Zaehlt die Zeilen, die auf eine menschliche Freigabe warten.
+ * Liest nur Spalte F — die Statusspalte —, damit der Aufruf billig bleibt.
+ */
+export async function zaehleOffenePruefungen(
+  sheets: ReturnType<typeof googleSheets>,
+  sheetId: string,
+): Promise<number> {
+  const antwort = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${QUEUE_TAB}!F:F`,
+  });
+  const zeilen = antwort.data.values ?? [];
+  return zeilen.slice(1).filter((z) => String(z?.[0] ?? "").trim() === "PRUEFEN").length;
 }
 
 async function ladeVorhandeneKontakte(
@@ -217,9 +241,26 @@ async function holeWebsiteVonPlaceDetails(placeId: string): Promise<string | nul
   } catch { return null; }
 }
 
+/**
+ * Dekodiert einen `mailto:`-Wert. Ein Leerzeichen steht dort als `%20`, und das
+ * enthaelt kein literales Whitespace — die Adresse rutschte deshalb durch jede
+ * Pruefung. Fund vom 27.08.2026: `mailto:%20info@kosmetik-mannheim.de` landete
+ * als `%20info@...` im Sheet und waere als unzustellbare Mail versendet worden.
+ * `decodeURIComponent` wirft bei kaputten Sequenzen, darum der Fallback.
+ */
+export function dekodiereMailto(roh: string): string {
+  let wert = roh;
+  try {
+    wert = decodeURIComponent(roh);
+  } catch {
+    wert = roh.replace(/%20/gi, " ");
+  }
+  return wert.trim().toLowerCase();
+}
+
 function extrahiereEmails(html: string): string[] {
   const mailtoEmails = [...html.matchAll(/href=["']mailto:([^"'?\s]+)/gi)]
-    .map(m => m[1].toLowerCase().replace(/[.,;)]+$/, ""))
+    .map(m => dekodiereMailto(m[1]).replace(/[.,;)]+$/, ""))
     .filter(e => e.includes("@"));
   const textEmails = [...html.matchAll(EMAIL_REGEX)].map(m => m[0].toLowerCase().replace(/[.,;)]+$/, ""));
   return [...new Set([...mailtoEmails, ...textEmails])];
@@ -602,6 +643,17 @@ const FREIMAIL_PROVIDER = [
 // zusammenfallen und jede britische Domain zur selben Firma gehoeren.
 const ZWEITEILIGE_SUFFIXE = ["co.uk", "org.uk", "ac.uk", "com.au", "co.nz", "com.br"];
 
+// Adressen, die auf der Seite stehen, aber niemandem gehoeren: Beispieltexte aus
+// Website-Vorlagen, die der Betrieb nie ersetzt hat. Fund vom 27.08.2026:
+// `beispiel@gmail.com` als einzige Adresse eines Kosmetikstudios. `example.com`
+// steht bereits in FREMD_DOMAINS — dort war aber nur die *Domain* geprueft, und
+// der Platzhalter steht genauso oft im lokalen Teil vor einer echten Freemail-Domain.
+const PLATZHALTER_LOKALTEILE = [
+  "beispiel", "example", "muster", "mustermann", "musterfrau",
+  "deinemail", "deine-email", "ihremail", "ihre-email",
+  "vorname", "vorname.nachname", "name", "email", "e-mail", "adresse",
+];
+
 const FREMD_DOMAINS = [
   "studiolution.com", "shore.com", "treatwell.de", "treatwell.com",
   "planity.com", "phorest.com", "salonkee.de", "doctolib.de",
@@ -649,6 +701,13 @@ export function adresseIstUnbrauchbar(email: string): string | null {
   const ersterTeil = lokal.split(/[.\-_+]/)[0] ?? "";
   const treffer = [lokal, ersterTeil].find((kandidat) => UNBRAUCHBARE_PREFIXES.includes(kandidat));
   if (treffer) return `Postfach "${treffer}@" liest kein Entscheider`;
+
+  const platzhalter = [lokal, ersterTeil].find((kandidat) => PLATZHALTER_LOKALTEILE.includes(kandidat));
+  if (platzhalter) return `Platzhalter-Adresse ("${platzhalter}@") aus einer Website-Vorlage`;
+
+  // Nach dem Dekodieren darf kein Prozentzeichen mehr drinstehen. Bleibt eines
+  // uebrig, war die Sequenz kaputt und die Adresse ist unzustellbar.
+  if (adresse.includes("%")) return "Prozentzeichen in der Adresse (kaputte Kodierung)";
 
   if (FREMD_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`))) {
     return `Fremde Domain (${domain}) — gehoert nicht dem Betrieb`;
@@ -898,6 +957,36 @@ EMAIL: <email-text>`,
     }
   }
 
+  // Vierte Prüfung, gleiche Bauart wie die drei darüber: Der Prompt verbietet
+  // den Beobachtungs-Einstieg ausdrücklich und bekam ihn am 27.08. trotzdem in
+  // 2 von 60 Entwürfen. Hier hilft kein Umformen — welcher Satz stattdessen
+  // dastehen soll, weiß nur das Modell.
+  if (oeffnerIstFloskel(ergebnis.inhalt)) {
+    console.log(`Verbotener Einstieg ("ich habe gesehen"/"mir ist aufgefallen") – Neuversuch für ${firma}`);
+    const nachgefasst = await erzeuge(
+      `Die Mail startet mit einer Beobachtungs-Floskel ("ich habe gesehen", "mir ist aufgefallen" oder ähnlich). Genau dieser Einstieg verrät den Serienbrief. Gib denselben Betreff und dieselbe Mail erneut aus, aber steig mit dem konkreten Detail selbst ein, ohne zu erzählen, dass du es gesehen hast. Sonst nichts ändern. Wieder im Format BETREFF: / EMAIL:.`
+    );
+    // Nur übernehmen, wenn der zweite Versuch das Problem löst und dabei weder
+    // den Firmennamen noch die Hook-Regel wieder verletzt.
+    if (
+      !oeffnerIstFloskel(nachgefasst.inhalt) &&
+      nameIstGenannt(nachgefasst.inhalt, firma) &&
+      !hookIstAbgeschrieben(nachgefasst.inhalt, branchenHinweis)
+    ) {
+      ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
+    } else {
+      console.log(`Einstieg auch im 2. Versuch eine Floskel für ${firma}`);
+    }
+  }
+
+  // Fünfte Prüfung, aber ohne Nachfass: die Anrede wird umgeformt statt neu
+  // erbeten. Siehe vereinheitlicheAnrede() — eine mechanische Umformung gehört
+  // nicht in einen zweiten LLM-Aufruf.
+  ergebnis = { betreff: ergebnis.betreff, inhalt: vereinheitlicheAnrede(ergebnis.inhalt) };
+  if (anredeIstGemischt(ergebnis.inhalt)) {
+    console.log(`Anrede bleibt gemischt nach Umformung für ${firma} — Regel greift nicht`);
+  }
+
   return ergebnis;
 }
 
@@ -937,6 +1026,26 @@ export const nachtRecherche = schedules.task({
 
     const { sheets, sheetId } = await getQueue();
     await sicherQueueTab(sheets, sheetId);
+
+    // Bremse gegen den teuersten Leerlauf, den es hier gibt (Befund 27.08.2026):
+    // Solange die Kategorien PRUEFEN schreiben, muss ein Mensch freigeben. Tut er
+    // das ein paar Tage nicht, recherchiert der Lauf trotzdem jede Nacht weiter —
+    // fuer rund 2-3 EUR Maps- und LLM-Kosten Nachschub auf einen Stapel, der
+    // liegen bleibt. Am 26.08. lagen 60 ungelesene Entwuerfe da und der Lauf legte
+    // 30 weitere dazu.
+    //
+    // Der Schnitt liegt bewusst NICHT bei "irgendwas liegt da", sondern bei zwei
+    // vollen Versandtagen: darunter ist ein Vorrat gesund, darueber staut es sich.
+    const offen = await zaehleOffenePruefungen(sheets, sheetId);
+    if (offen > PRUEFEN_OBERGRENZE) {
+      const grund = `${offen} Entwuerfe stehen auf PRUEFEN (Grenze ${PRUEFEN_OBERGRENZE}) — erst freigeben, dann neu recherchieren`;
+      console.log(`=== Nacht-Recherche uebersprungen: ${grund} ===`);
+      // `uebersprungen` ist der Unterschied zwischen "nichts gefunden" und "nichts
+      // gesucht". Ohne dieses Feld wuerde der Health-Monitor die 0 als Leerlauf
+      // melden — ein Waechter, der an ruhigen Tagen schreit, wird ignoriert.
+      return { entwuerfe: 0, kategorie: "-", status: "-", uebersprungen: grund };
+    }
+
     const vorhandene = await ladeVorhandeneKontakte(sheets, sheetId);
     // Betreff-Historie: verhindert, dass Nacht für Nacht dieselben Formulierungen
     // rausgehen. Wächst im Lauf mit jedem neuen Betreff weiter.
@@ -1065,7 +1174,9 @@ export const nachtRecherche = schedules.task({
               }
               const demoId = neueDemoId();
               const entwurf = await generiereEmailEntwurf({
-                firma: firma.name,
+                // Nicht firma.name: Maps liefert den SEO-Titel, nicht den Namen.
+                // Ungefiltert landet er im ersten Satz der Mail (Fund 27.08.2026).
+                firma: saubererBetriebsname(firma.name, zielstadt),
                 stadt: zielstadt,
                 kategorie,
                 nische,
@@ -1122,3 +1233,7 @@ export const nachtRecherche = schedules.task({
     return { entwuerfe: emailGespeichert, kategorie: kategorie.label, status: draftStatus };
   },
 });
+
+// Weiter-Export: die Anrede-Logik liegt in anrede.ts, wird aber ueber dieses
+// Modul mitgetestet und mitbenutzt wie die anderen Quality-Gates.
+export { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
