@@ -13,7 +13,7 @@ function fetchMitTimeout(url: string, options?: RequestInit, timeoutMs = 30000):
 function parseGermanDate(dateStr: string): Date | null {
   const match = dateStr.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   if (!match) return null;
-  const [, day, month, year] = match;
+  const [, day, month, year] = match as unknown as [string, string, string, string];
   return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
 }
 

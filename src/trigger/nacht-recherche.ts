@@ -3,6 +3,10 @@ import { schedules, wait } from "@trigger.dev/sdk";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
 import { saubererBetriebsname, oeffnerIstFloskel } from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
+import {
+  neuerNachfasszaehler, zaehleEntwurf, zaehleNachfass, nachfassBericht,
+  type Nachfasszaehler,
+} from "./nachfass-zaehler";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import OpenAI from "openai";
@@ -272,7 +276,7 @@ export function dekodiereMailto(roh: string): string {
 
 function extrahiereEmails(html: string): string[] {
   const mailtoEmails = [...html.matchAll(/href=["']mailto:([^"'?\s]+)/gi)]
-    .map(m => dekodiereMailto(m[1]).replace(/[.,;)]+$/, ""))
+    .map(m => dekodiereMailto(m[1] ?? "").replace(/[.,;)]+$/, ""))
     .filter(e => e.includes("@"));
   const textEmails = [...html.matchAll(EMAIL_REGEX)].map(m => m[0].toLowerCase().replace(/[.,;)]+$/, ""));
   return [...new Set([...mailtoEmails, ...textEmails])];
@@ -321,7 +325,7 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
   // diesen Zweig hereingekommen (Z1186, Z1229, Z1241, Z1266).
   const pruefEmail = (email: string): boolean => {
     if (!email.includes("@")) return false;
-    const prefix = email.split("@")[0];
+    const prefix = email.split("@")[0] ?? "";
     if (IGNORIERTE_PREFIXES.has(prefix)) return false;
     if (emailPasstZurWebsite(email, baseUrl) !== null) return false;
     return true;
@@ -342,7 +346,7 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
     if (!inhalt) continue;
     for (const email of extrahiereEmails(inhalt)) {
       if (!pruefEmail(email)) continue;
-      const prefix = email.split("@")[0];
+      const prefix = email.split("@")[0] ?? "";
       if (BEVORZUGTE_PREFIXES.has(prefix)) return email;
       alleEmails.push(email);
     }
@@ -352,7 +356,7 @@ export async function findeEmailAufWebsite(websiteUrl: string): Promise<string |
   if (impressumInhalt) {
     for (const email of extrahiereEmails(impressumInhalt)) {
       if (!pruefEmail(email)) continue;
-      const prefix = email.split("@")[0];
+      const prefix = email.split("@")[0] ?? "";
       if (BEVORZUGTE_PREFIXES.has(prefix)) return email;
       alleEmails.push(email);
     }
@@ -830,6 +834,8 @@ export type EntwurfKontext = {
   link: string;
   betreffIndex?: number;
   verbrauchteBetreffe?: string[];
+  /** Optional. Fehlt er, misst der Lauf nichts — Dry-Runs sollen nichts mitzaehlen. */
+  nachfassen?: Nachfasszaehler;
 };
 
 export async function generiereEmailEntwurf(
@@ -837,7 +843,7 @@ export async function generiereEmailEntwurf(
 ): Promise<{ betreff: string; inhalt: string }> {
   const {
     firma, stadt, kategorie, nische, websiteText, link,
-    betreffIndex = 0, verbrauchteBetreffe = [],
+    betreffIndex = 0, verbrauchteBetreffe = [], nachfassen,
   } = kontext;
   const openai = getOpenAI();
   const branche = nische.name;
@@ -923,12 +929,15 @@ EMAIL: <email-text>`,
   // dadurch, dass dem Prompt vertraut und das Ergebnis nie geprüft wurde.
   // Also: Ergebnis prüfen, bei Verstoß einmal gezielt nachfassen.
   let ergebnis = await erzeuge();
+  zaehleEntwurf(nachfassen);
   if (!betreffIstBrauchbar(ergebnis.betreff, verbrauchteBetreffe)) {
     console.log(`Betreff verworfen ("${ergebnis.betreff}") – Neuversuch für ${firma}`);
     ergebnis = await erzeuge(
       `Der Betreff "${ergebnis.betreff}" ist unbrauchbar: er enthält ein verbotenes Wort (Anruf/anrufen/Telefon/verpasst) oder wiederholt einen bereits verschickten Betreff. Gib die Mail unverändert erneut aus, aber mit einem NEUEN Betreff nach diesem Blickwinkel: ${betreffAngle.anweisung} Wieder im Format BETREFF: / EMAIL:.`
     );
-    if (!betreffIstBrauchbar(ergebnis.betreff, verbrauchteBetreffe)) {
+    const betreffGeloest = betreffIstBrauchbar(ergebnis.betreff, verbrauchteBetreffe);
+    zaehleNachfass(nachfassen, "betreff", betreffGeloest);
+    if (!betreffGeloest) {
       console.log(`Betreff auch im 2. Versuch unbrauchbar ("${ergebnis.betreff}") für ${firma}`);
     }
   }
@@ -941,7 +950,9 @@ EMAIL: <email-text>`,
     );
     // Nur übernehmen, wenn der zweite Versuch das Problem wirklich löst — sonst
     // lieber die erste, sprachlich saubere Fassung behalten.
-    if (nameIstGenannt(nachgefasst.inhalt, firma)) {
+    const nameGeloest = nameIstGenannt(nachgefasst.inhalt, firma);
+    zaehleNachfass(nachfassen, "name", nameGeloest);
+    if (nameGeloest) {
       ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
     } else {
       console.log(`Firmenname auch im 2. Versuch nicht drin für ${firma}`);
@@ -960,10 +971,11 @@ EMAIL: <email-text>`,
     );
     // Nur übernehmen, wenn der zweite Versuch das Problem wirklich löst — und
     // dabei nicht den Firmennamen verliert, den der Schritt davor gerettet hat.
-    if (
+    const hookGeloest =
       !hookIstAbgeschrieben(nachgefasst.inhalt, branchenHinweis) &&
-      nameIstGenannt(nachgefasst.inhalt, firma)
-    ) {
+      nameIstGenannt(nachgefasst.inhalt, firma);
+    zaehleNachfass(nachfassen, "hook", hookGeloest);
+    if (hookGeloest) {
       ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
     } else {
       console.log(`Hook auch im 2. Versuch übernommen für ${firma}`);
@@ -981,11 +993,12 @@ EMAIL: <email-text>`,
     );
     // Nur übernehmen, wenn der zweite Versuch das Problem löst und dabei weder
     // den Firmennamen noch die Hook-Regel wieder verletzt.
-    if (
+    const einstiegGeloest =
       !oeffnerIstFloskel(nachgefasst.inhalt) &&
       nameIstGenannt(nachgefasst.inhalt, firma) &&
-      !hookIstAbgeschrieben(nachgefasst.inhalt, branchenHinweis)
-    ) {
+      !hookIstAbgeschrieben(nachgefasst.inhalt, branchenHinweis);
+    zaehleNachfass(nachfassen, "einstieg", einstiegGeloest);
+    if (einstiegGeloest) {
       ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
     } else {
       console.log(`Einstieg auch im 2. Versuch eine Floskel für ${firma}`);
@@ -1039,6 +1052,10 @@ export const nachtRecherche = schedules.task({
 
     const { sheets, sheetId } = await getQueue();
     await sicherQueueTab(sheets, sheetId);
+
+    // Misst sich selbst, statt die Zahl im Trace zu verstecken. Siehe
+    // nachfass-zaehler.ts — der Grund steht dort, nicht hier.
+    const nachfassen = neuerNachfasszaehler();
 
     // Bremse gegen den teuersten Leerlauf, den es hier gibt (Befund 27.08.2026):
     // Solange die Kategorien PRUEFEN schreiben, muss ein Mensch freigeben. Tut er
@@ -1197,6 +1214,7 @@ export const nachtRecherche = schedules.task({
                 link: demoLink(demoId, kategorie.demo),
                 betreffIndex,
                 verbrauchteBetreffe,
+                nachfassen,
               });
               betreffIndex++;
               // Sofort als verbraucht führen, damit die nächste Mail desselben Laufs
@@ -1243,7 +1261,18 @@ export const nachtRecherche = schedules.task({
 
     // Siehe morgen-versand: die WARNUNG oben stand bisher nur im Log. Als
     // Rueckgabe kann der agent-health-monitor sie lesen und melden.
-    return { entwuerfe: emailGespeichert, kategorie: kategorie.label, status: draftStatus };
+    const bericht = nachfassBericht(nachfassen);
+    console.log(
+      `Nachfass-Quote: ${bericht.nachgefasst} Zusatzaufrufe auf ${bericht.entwuerfe} Entwuerfe ` +
+      `(${bericht.quote}) — ausgeloest ${JSON.stringify(bericht.ausgeloest)}, ` +
+      `davon gescheitert ${JSON.stringify(bericht.gescheitert)}`
+    );
+    return {
+      entwuerfe: emailGespeichert,
+      kategorie: kategorie.label,
+      status: draftStatus,
+      nachfassen: bericht,
+    };
   },
 });
 

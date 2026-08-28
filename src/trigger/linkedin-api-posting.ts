@@ -149,8 +149,15 @@ async function sendeStatusReport(
   const apiKey = process.env.BREVO_API_KEY;
   const absenderEmail = process.env.ABSENDER_EMAIL;
   if (!apiKey || !absenderEmail) return;
-  // Report-Mail deaktiviert auf Nios Wunsch (2026-07-06) — Crash-Alarme laufen weiter über agent-health-monitor. Reaktivieren: nächste Zeile entfernen.
-  return;
+  // Report-Mail deaktiviert auf Nios Wunsch (2026-07-06) — Crash-Alarme laufen
+  // weiter ueber agent-health-monitor. Reaktivieren: auf true setzen.
+  //
+  // Bewusst ein annotierter Schalter statt eines nackten `return;`: mit dem
+  // nackten return galt alles darunter als unerreichbar, und unerreichbarer
+  // Code verliert jede Typinformation. Der erste Typecheck-Lauf (28.08.2026)
+  // meldete das vier Mal in vier Dateien — immer denselben Report-Block.
+  const REPORT_MAILS_AKTIV: boolean = false;
+  if (!REPORT_MAILS_AKTIV) return;
 
   await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",

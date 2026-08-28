@@ -356,6 +356,15 @@ export async function leseUngeleseneEmails(): Promise<EmailData[]> {
       // Kein Betreff-Filter mehr: alle ungelesenen Antworten holen,
       // die Lead-Zuordnung filtert später über die Outreach Queue.
       const uids = await client.search({ seen: false }, { uid: true });
+      // imapflow liefert `false`, wenn die Suche selbst fehlschlaegt. Ohne diese
+      // Pruefung lief `uids.slice()` in einen TypeError und der Agent stuerzte —
+      // gefunden vom ersten Typecheck-Lauf am 28.08.2026. Bewusst ein Fehler und
+      // keine leere Liste: eine fehlgeschlagene Suche sieht sonst aus wie "keine
+      // Antworten da", und genau diese Verwechslung hat schon zweimal Tage
+      // gekostet (Maps-Billing 06.07., Spalten-Bug 16.07.).
+      if (uids === false) {
+        throw new Error("IMAP-Suche fehlgeschlagen (search lieferte false) — keine Aussage ueber ungelesene Mails moeglich");
+      }
       logger.log(`Ungelesene E-Mails gesamt: ${uids.length}`);
 
       const zuVerarbeiten = uids.slice(0, 50);
@@ -650,8 +659,15 @@ async function sendeReport(zeilen: string[]): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY;
   const absenderEmail = process.env.ABSENDER_EMAIL;
   if (!apiKey || !absenderEmail) return;
-  // Report-Mail deaktiviert auf Nios Wunsch (2026-07-06) — Crash-Alarme laufen weiter über agent-health-monitor. Reaktivieren: nächste Zeile entfernen.
-  return;
+  // Report-Mail deaktiviert auf Nios Wunsch (2026-07-06) — Crash-Alarme laufen
+  // weiter ueber agent-health-monitor. Reaktivieren: auf true setzen.
+  //
+  // Bewusst ein annotierter Schalter statt eines nackten `return;`: mit dem
+  // nackten return galt alles darunter als unerreichbar, und unerreichbarer
+  // Code verliert jede Typinformation. Der erste Typecheck-Lauf (28.08.2026)
+  // meldete das vier Mal in vier Dateien — immer denselben Report-Block.
+  const REPORT_MAILS_AKTIV: boolean = false;
+  if (!REPORT_MAILS_AKTIV) return;
   const heute = new Date().toLocaleDateString("de-DE", {
     timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric",
   });

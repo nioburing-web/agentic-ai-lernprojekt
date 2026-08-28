@@ -72,7 +72,7 @@ async function analysiereAnfrage(payload: Payload): Promise<Kategorie> {
       temperature: 0,
     });
 
-    const kategorie = response.choices[0].message.content?.trim().toUpperCase() as Kategorie;
+    const kategorie = response.choices[0]?.message?.content?.trim().toUpperCase() as Kategorie;
 
     if (!GUELTIGE_KATEGORIEN.includes(kategorie)) {
       throw new Error(`Ungültige Kategorie erhalten: '${kategorie}'`);
@@ -125,7 +125,7 @@ async function generiereAntwort(
     });
 
     const emailText =
-      response.choices[0].message.content?.trim() ??
+      response.choices[0]?.message?.content?.trim() ??
       `Guten Tag ${name},\n\nIch melde mich innerhalb von 24 Stunden persönlich bei Ihnen.`;
 
     logger.log("Schritt 2 abgeschlossen", { betreff, personalisiert: true });

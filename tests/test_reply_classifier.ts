@@ -197,7 +197,7 @@ function test11_waehleAusgewogen(): void {
   const sel = waehleLernbeispiele(alle, 3);
   assert(sel.length === 3, "Test 11a: genau 3 gewählt");
   assert(sel.some((b) => b.richtigKategorie === "ABGELEHNT"), "Test 11b: Minderheits-Kategorie ABGELEHNT trotzdem dabei");
-  assert(sel[0].emailAuszug === "i4", "Test 11c: neuestes Beispiel zuerst");
+  assert(sel[0]!.emailAuszug === "i4", "Test 11c: neuestes Beispiel zuerst");
   assert(waehleLernbeispiele(alle, 0).length === 0, "Test 11d: n=0 → leer");
   assert(waehleLernbeispiele([], 5).length === 0, "Test 11e: leere Eingabe → leer");
 }
@@ -233,8 +233,8 @@ function test13_harvest(): void {
 
   const out = zuHarvestendeZeilen([header, r1, r2, r3, r4]);
   assert(out.length === 2, "Test 13a: genau 2 Zeilen zum Harvesten");
-  assert(out[0].rowNumber === 2, "Test 13b: rowNumber 1-basiert (erste Datenzeile = 2)");
-  assert(out[0].beispiel.richtigKategorie === "RÜCKFRAGE", "Test 13c: richtige Kategorie aus Spalte N");
+  assert(out[0]!.rowNumber === 2, "Test 13b: rowNumber 1-basiert (erste Datenzeile = 2)");
+  assert(out[0]!.beispiel.richtigKategorie === "RÜCKFRAGE", "Test 13c: richtige Kategorie aus Spalte N");
   const r4out = out.find((o) => o.beispiel.leadEmail === "g@h.de")!;
   assert(r4out.beispiel.richtigKategorie === "INTERESSIERT", "Test 13d: nur O gefüllt → Kategorie fällt auf Agent-Wert (L)");
   assert(r4out.beispiel.deineAntwort.includes("umformuliert"), "Test 13e: Nios Antwort übernommen");

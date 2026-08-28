@@ -28,7 +28,12 @@ const EIGENE_TASK_ID = "agent-health-monitor";
 // Über den Payload überschreibbar (z.B. für manuelle Tests gegen historische Failures).
 const LOOKBACK_MIN_DEFAULT = 65;
 
-type MonitorPayload = { lookbackMin?: number } | undefined;
+// Frueher stand hier `type MonitorPayload = { lookbackMin?: number } | undefined`
+// und run() nahm sie entgegen. Das war Wunschdenken: `schedules.task` uebergibt
+// immer den Zeitplan-Payload, nie ein eigenes Objekt — `payload?.lookbackMin`
+// war seit dem ersten Tag garantiert undefined und der Default hat immer
+// gegriffen. Aufgefallen beim ersten Typecheck-Lauf (28.08.2026). Das Fenster
+// ist damit eine Konstante, und jetzt steht das auch so da.
 
 // Was runs.retrieve() im error-Feld liefert (@trigger.dev/core 4.4.4).
 // runs.list() liefert dieses Feld NICHT — siehe fehlertextAus().
@@ -47,14 +52,15 @@ function ersteCodeStelle(stackTrace?: string): string | null {
     .filter((z) => z.startsWith("at "));
   if (zeilen.length === 0) return null;
 
-  const eigene = zeilen.find((z) => !z.includes("node_modules") && z.includes("/src/")) ?? zeilen[0];
+  // zeilen ist hier garantiert nicht leer, siehe die Pruefung darueber.
+  const eigene: string = zeilen.find((z) => !z.includes("node_modules") && z.includes("/src/")) ?? (zeilen[0] as string);
 
   // "at sicherQueueTab (file:///src/trigger/nacht-recherche.ts:70:20)"
   //   → "sicherQueueTab (nacht-recherche.ts:70)"
   const teile = eigene.match(/^at\s+(.+?)\s+\((.*)\)$/);
   if (!teile) return eigene.replace(/^at\s+/, "").slice(0, 120);
 
-  const ort = teile[2]
+  const ort = (teile[2] as string)
     .replace(/^file:\/\/\//, "")
     .replace(/^.*\//, "")
     .replace(/:(\d+):\d+$/, ":$1");
@@ -350,8 +356,8 @@ export const agentHealthMonitor = schedules.task({
     timezone: "Europe/Berlin",
   },
   maxDuration: 60,
-  run: async (payload: MonitorPayload) => {
-    const lookbackMin = payload?.lookbackMin ?? LOOKBACK_MIN_DEFAULT;
+  run: async () => {
+    const lookbackMin = LOOKBACK_MIN_DEFAULT;
     logger.log("Agent-Health-Monitor gestartet", { lookbackMin });
 
     const fehler = await sammleFehler(lookbackMin);

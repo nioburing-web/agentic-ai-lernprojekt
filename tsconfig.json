@@ -1,0 +1,33 @@
+{
+  // Warum es diese Datei gibt (28.08.2026): Es gab bis heute keinen Typecheck.
+  // `tsx` transpiliert nur — es wirft den Typ weg und fuehrt aus. Ein Tippfehler
+  // in einem Feldnamen faellt damit erst zur Laufzeit auf, und "zur Laufzeit"
+  // heisst hier: nachts um 23:00 in einem Lauf, den niemand ansieht.
+  //
+  // Die strengen Schalter sind nicht Geschmack. `noUncheckedIndexedAccess` ist
+  // genau der, der die Sheets-Zeilen betrifft: `row[5]` ist `string | undefined`,
+  // nicht `string`, und die fehlende Zelle ist hier ein realer Fall.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "tools/**/*.ts", "trigger.config.ts"],
+  "exclude": ["node_modules", ".trigger"]
+}

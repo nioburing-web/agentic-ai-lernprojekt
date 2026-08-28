@@ -51,7 +51,7 @@ function normalizeDatum(datumStr: string): string {
 }
 
 function tageDifferenz(datumStr: string): number {
-  const [day, month, year] = datumStr.split(".").map(Number);
+  const [day = 1, month = 1, year = 1970] = datumStr.split(".").map(Number);
   const datum = new Date(year, month - 1, day);
   const heute = new Date();
   heute.setHours(0, 0, 0, 0);

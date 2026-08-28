@@ -13,6 +13,18 @@ import "dotenv/config";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import { generiereEmailEntwurf, betreffKern, betreffIstBrauchbar } from "../src/trigger/nacht-recherche";
+import { KATEGORIEN } from "../src/trigger/nischen";
+
+// Der Aufruf war seit dem Umbau auf ein Kontext-Objekt kaputt (acht Positions-
+// argumente gegen einen Parameter) — aufgefallen erst beim ersten Typecheck am
+// 28.08.2026, weil das Werkzeug seit Juli niemand mehr ausgefuehrt hat. Genau
+// die Sorte Bruch, die ohne Typecheck beliebig lange unbemerkt liegt.
+function musshaben<T>(wert: T | undefined, fehlt: string): T {
+  if (wert === undefined) throw new Error(`${fehlt} gibt es nicht mehr in nischen.ts`);
+  return wert;
+}
+const KFZ = musshaben(KATEGORIEN.find((k) => k.slug === "kfz"), "Kategorie 'kfz'");
+const KFZ_NISCHE = musshaben(KFZ.nischen.find((n) => n.name === "Kfz-Werkstatt"), "Nische 'Kfz-Werkstatt'");
 
 const QUEUE_TAB = "Outreach Queue";
 const SCHREIBEN = process.argv.includes("--schreiben");
@@ -70,16 +82,16 @@ async function main(): Promise<void> {
     // echte, firmenspezifische Beobachtung aus dem Website-Text der Nacht-Recherche.
     // Ein generischer Platzhaltertext taugt hier nicht — dann fällt das Modell
     // mangels Unterscheidungsmerkmal reihenweise auf dieselbe Leistung zurück.
-    const entwurf = await generiereEmailEntwurf(
-      z.name,
-      z.stadt,
-      "Kfz-Werkstatt",
-      null,
-      z.entwurf,
-      "https://kfz-demo-agent.netlify.app/r/platzhalter",
-      i,
-      verbraucht,
-    );
+    const entwurf = await generiereEmailEntwurf({
+      firma: z.name,
+      stadt: z.stadt,
+      kategorie: KFZ,
+      nische: KFZ_NISCHE,
+      websiteText: z.entwurf,
+      link: "https://kfz-demo-agent.netlify.app/r/platzhalter",
+      betreffIndex: i,
+      verbrauchteBetreffe: verbraucht,
+    });
     const neu = entwurf.betreff;
     const ok = betreffIstBrauchbar(neu, verbraucht);
     if (!ok) schlecht++;
@@ -99,11 +111,16 @@ async function main(): Promise<void> {
       if (betreffIstBrauchbar(aktuell, [...verbraucht.filter((b) => b !== aktuell), ...andere])) continue;
 
       const z = ziele[i]!;
-      const neu = await generiereEmailEntwurf(
-        z.name, z.stadt, "Kfz-Werkstatt", null, z.entwurf,
-        "https://kfz-demo-agent.netlify.app/r/platzhalter",
-        i + runde * 3, [...verbraucht, ...andere],
-      );
+      const neu = await generiereEmailEntwurf({
+        firma: z.name,
+        stadt: z.stadt,
+        kategorie: KFZ,
+        nische: KFZ_NISCHE,
+        websiteText: z.entwurf,
+        link: "https://kfz-demo-agent.netlify.app/r/platzhalter",
+        betreffIndex: i + runde * 3,
+        verbrauchteBetreffe: [...verbraucht, ...andere],
+      });
       updates[i]!.values = [[neu.betreff]];
       console.log(`  Z${z.zeile}: "${aktuell}" -> "${neu.betreff}"`);
     }
