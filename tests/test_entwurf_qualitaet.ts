@@ -60,6 +60,84 @@ gleich(
   "Branche+Stadt hinten fällt weg",
 );
 
+// ─── Nachtrag Freigabe-Runde 28.08.2026 ──────────────────────────────────────
+// Zwei Luecken, beide an echten Zeilen der Nacht vom 27.08. gefunden:
+// 1. Getrennt wurde nur an "|". Maps liefert genauso oft " - ".
+// 2. Bei einer Partnerschaft blieb nur der erste Partner uebrig.
+
+// (1) Bindestrich als Trenner. Nur der freistehende Bindestrich zaehlt —
+//     der Bindestrich IM Wort ("Haus- und", "Scholze-Kurz") ist Teil des Namens.
+
+gleich(
+  saubererBetriebsname("DEBUS Immobilien Rüdiger Debus - Immobilienmakler - Verkauf, Vermietung und Verwaltung von Immobilien", "Wiesbaden"),
+  "DEBUS Immobilien Rüdiger Debus",
+  "echter Fund 28.08.: Bindestrich trennt, der Beschreibungs-Schwanz faellt weg",
+);
+
+gleich(
+  saubererBetriebsname("UP Steuerrecht Rechtsanwalts GmbH - Ihre Unternehmens-Partner", "Wiesbaden"),
+  "UP Steuerrecht Rechtsanwalts GmbH",
+  "echter Fund 28.08.: Slogan hinter dem Bindestrich faellt weg",
+);
+
+gleich(
+  saubererBetriebsname("Hausverwaltung Wiesbaden - Naspa Immobilien GmbH", "Wiesbaden"),
+  "Naspa Immobilien GmbH",
+  "echter Fund 28.08.: Branche+Stadt VOR dem Bindestrich wird uebersprungen",
+);
+
+gleich(
+  saubererBetriebsname("FNW Haus- und Grundstücksverwaltung GmbH", "Wiesbaden"),
+  "FNW Haus- und Grundstücksverwaltung GmbH",
+  "Bindestrich im Wort ist kein Trenner — 'Haus- und' bleibt zusammen",
+);
+
+gleich(
+  saubererBetriebsname("Scholze-Kurz & Kurz Immobilien GmbH", "Wiesbaden"),
+  "Scholze-Kurz & Kurz Immobilien GmbH",
+  "durchgekoppelter Nachname bleibt unangetastet",
+);
+
+gleich(
+  saubererBetriebsname("Kanzlei Meinke – Steuerberatung", "Wiesbaden"),
+  "Kanzlei Meinke",
+  "auch der Gedankenstrich trennt, nicht nur der Bindestrich",
+);
+
+// (2) Partnerschaft: fuehrende Einzelwort-Segmente sind Nachnamen und gehoeren
+//     an das Segment dahinter. Sie enden, sobald ein generisches Segment kommt —
+//     genau daran unterscheidet sich der Partner-Fall vom SEO-Fall.
+
+gleich(
+  saubererBetriebsname("HERKERT | SCHULZ | FRICK Rechtsanwälte Steuerberater PartG", "Wiesbaden"),
+  "HERKERT SCHULZ FRICK Rechtsanwälte Steuerberater PartG",
+  "echter Fund 28.08.: alle Partner bleiben, nicht nur der erste",
+);
+
+gleich(
+  saubererBetriebsname("Meier | Müller | Schulz", "Hamburg"),
+  "Meier Müller Schulz",
+  "nur Nachnamen, kein Segment dahinter: trotzdem alle drei",
+);
+
+gleich(
+  saubererBetriebsname("dentimea | Zahnarzt Augsburg | Dr. Dr. Alexander Mai", "Augsburg"),
+  "dentimea",
+  "die Partner-Regel darf den 27.08.-Fund nicht wieder aufreissen: nach der Marke kommt Branche+Stadt, also Schluss",
+);
+
+gleich(
+  saubererBetriebsname("JK - Büroservice", "Hamburg"),
+  "JK Büroservice",
+  "Fund aus der Gegenprobe 28.08.: kurzes Kuerzel wird nicht zugunsten der Branche weggeworfen",
+);
+
+gleich(
+  saubererBetriebsname("F80 – Die Zahn- und Gesichtsspezialisten – Berlin", "Berlin"),
+  "F80",
+  "Kuerzel mit Ziffer bleibt ebenfalls stehen",
+);
+
 // ─── oeffnerIstFloskel ───────────────────────────────────────────────────────
 
 check(

@@ -8,16 +8,45 @@
  * diese beiden sind es nicht und brauchen deshalb einen anderen Weg.
  */
 
+import { KATEGORIEN } from "./nischen";
+
 // Generische Bestandteile eines Google-Maps-Titels. Maps liefert nicht den Namen
 // des Betriebs, sondern den SEO-Titel.
+//
+// Zwei Quellen, und das mit Absicht:
+//
+// 1. Die Branchenwoerter kommen aus `nischen.ts`, nicht aus einer zweiten Liste
+//    hier. Der Grund steht in einem eigenen Befund vom 28.08.2026: die
+//    handgepflegte Liste war auf Zahnarzt, Friseur und Tierarzt stehen
+//    geblieben, waehrend die Nischen-Rotation laengst auf Steuerkanzleien und
+//    Hausverwaltungen umgestellt hatte. "Hausverwaltung Wiesbaden - Naspa
+//    Immobilien GmbH" blieb deshalb ungekuerzt. Eine neue Nische bringt ihr
+//    Vokabular ab jetzt selbst mit; vergessen kann man es nicht mehr.
+// 2. Der handgepflegte Rest deckt ab, was keine Nische ist: Rechtsform,
+//    Praxis-Woerter, Fuellwoerter.
+const NISCHEN_WOERTER = KATEGORIEN.flatMap((k) =>
+  k.nischen.flatMap((n) => [n.name, ...n.suchbegriffe]),
+)
+  .flatMap((begriff) => begriff.toLowerCase().split(/[^a-zäöüß]+/))
+  .filter((w) => w.length >= 3);
+
 const GENERISCHE_TITELWOERTER = new Set([
-  "zahnarzt", "zahnärzte", "zahnaerzte", "zahnarztpraxis", "zahnmedizin", "zahnheilkunde",
-  "tierarzt", "tierarztpraxis", "tierärztliche", "tieraerztliche", "tierklinik",
-  "friseur", "friseursalon", "hairdresser", "coiffeur",
-  "kosmetik", "kosmetikstudio", "fußpflege", "fusspflege", "podologie", "fahrschule",
+  ...NISCHEN_WOERTER,
+  "zahnaerzte", "tieraerztliche", "tierärztliche", "zahnmedizin", "zahnheilkunde",
+  "hairdresser", "coiffeur", "fusspflege",
   "praxis", "praxisklinik", "klinik", "studio", "salon", "institut", "zentrum",
-  "für", "fuer", "und", "der", "die", "das",
+  "büro", "buero", "kanzlei",
+  "für", "fuer", "und", "der", "die", "das", "ihre", "ihr",
 ]);
+
+/**
+ * Trenner in einem Google-Maps-Titel: die Pipe und der freistehende Strich.
+ *
+ * Der Strich muss auf beiden Seiten Leerraum haben. Sonst zerlegt die Regel
+ * durchgekoppelte Namen, und davon leben ganze Branchen: "Scholze-Kurz",
+ * "FNW Haus- und Grundstücksverwaltung", "Unternehmens-Partner".
+ */
+const TRENNER = /\s*\|\s*|\s+[-–—]\s+/;
 
 /**
  * Holt aus einem Google-Maps-Titel den Teil, den ein Mensch als Namen des
@@ -34,29 +63,82 @@ const GENERISCHE_TITELWOERTER = new Set([
  * Die Namensprüfung hat hier korrekt gearbeitet. Der Fehler saß eine Stufe
  * davor, in dem, was ihr als "Name" übergeben wurde.
  *
- * Die Regel schneidet nur an `|` und wirft nur Segmente weg, die restlos aus
- * Branche und Stadt bestehen. Sie rät nichts: bleibt nichts übrig, gewinnt der
- * Originaltitel.
+ * Die Regel wirft nur Segmente weg, die restlos aus Branche und Stadt bestehen.
+ * Sie rät nichts: bleibt nichts übrig, gewinnt das erste Segment.
+ *
+ * Zwei Nachträge aus der Freigabe-Runde vom 28.08.2026, beide an echten Zeilen
+ * der Nacht davor gefunden:
+ *
+ * 1. Getrennt wurde nur an "|". Maps liefert genauso oft " - ", und dann lief
+ *    der ganze SEO-Schwanz ungefiltert durch — "DEBUS Immobilien Rüdiger Debus
+ *    - Immobilienmakler - Verkauf, Vermietung und Verwaltung von Immobilien".
+ *    3 von 30 Entwürfen der Nacht waren betroffen.
+ *
+ * 2. Bei einer Partnerschaft blieb nur der erste Partner übrig: aus
+ *    "HERKERT | SCHULZ | FRICK Rechtsanwälte Steuerberater PartG" wurde
+ *    "HERKERT". Das ist derselbe Schaden wie der SEO-Titel, nur andersherum —
+ *    die Kanzlei im ersten Satz falsch zu nennen ist nicht besser, als sie zu
+ *    lang zu nennen. Siehe `zieheFuehrendeNachnamen`.
  */
 export function saubererBetriebsname(titel: string, stadt = ""): string {
   const roh = (titel ?? "").trim();
-  if (!roh.includes("|")) return roh;
+  if (!TRENNER.test(roh)) return roh;
 
   const stadtWoerter = new Set(
     stadt.toLowerCase().split(/[\s,\-]+/).filter((w) => w.length >= 3),
   );
 
-  const segmente = roh.split("|").map((t) => t.trim()).filter(Boolean);
+  const segmente = roh.split(TRENNER).map((t) => t.trim()).filter(Boolean);
 
   const istGenerisch = (segment: string): boolean => {
     const woerter = segment.toLowerCase().split(/[\s.]+/).filter((w) => w.length >= 3);
-    if (woerter.length === 0) return true;
+    // Bleibt nach dem Raster nichts uebrig, besteht das Segment nur aus kurzen
+    // Kuerzeln — "JK", "F80", "1a". Das ist eine Marke und nie eine Branche.
+    // Vor dem 28.08. galt so ein Segment als generisch; solange nur an "|"
+    // getrennt wurde, fiel das nicht auf. Mit dem Bindestrich als Trenner wurde
+    // daraus sofort ein Schaden: aus "JK - Bueroservice" wurde "Bueroservice",
+    // also die Branche statt des Namens.
+    if (woerter.length === 0) return false;
     return woerter.every((w) => GENERISCHE_TITELWOERTER.has(w) || stadtWoerter.has(w));
   };
 
-  const echte = segmente.filter((seg) => !istGenerisch(seg));
-  if (echte.length === 0) return segmente[0] ?? roh;
+  const zusammengezogen = zieheFuehrendeNachnamen(segmente, istGenerisch);
+
+  const echte = zusammengezogen.filter((seg) => !istGenerisch(seg));
+  if (echte.length === 0) return zusammengezogen[0] ?? roh;
   return echte[0] as string;
+}
+
+/**
+ * Zieht führende Einzelwort-Segmente mit dem Segment dahinter zusammen.
+ *
+ * Warum das genau der Partner-Fall ist und nicht der SEO-Fall: Eine Kanzlei
+ * heißt "HERKERT | SCHULZ | FRICK Rechtsanwälte Steuerberater PartG" — drei
+ * nackte Nachnamen hintereinander, dann die Rechtsform. Ein SEO-Titel heißt
+ * "dentimea | Zahnarzt Augsburg | ..." — nach der Marke kommt sofort
+ * Branche+Stadt. Die Kette bricht deshalb am ersten generischen Segment ab,
+ * und nur dort. Ein mehrwortiges erstes Segment ("Hair Deluxe", "Gladigau
+ * Immobilien Hamburg") ist kein Nachname und startet die Kette gar nicht.
+ *
+ * Zusammengefügt wird mit Leerzeichen, nicht mit dem Original-Trenner: der Name
+ * landet in einem Fließtext, und "bei HERKERT | SCHULZ | FRICK" liest sich dort
+ * wie ein Datenbankfeld.
+ */
+function zieheFuehrendeNachnamen(
+  segmente: string[],
+  istGenerisch: (s: string) => boolean,
+): string[] {
+  const istNachname = (seg: string) => seg.split(/\s+/).length === 1 && !istGenerisch(seg);
+
+  let k = 0;
+  while (k < segmente.length && istNachname(segmente[k] as string)) k++;
+  if (k < 2) return segmente; // ein einzelnes Wort ist eine Marke, keine Partnerschaft
+
+  // Das Segment hinter der Kette gehört dazu, solange es nicht generisch ist —
+  // es trägt die Rechtsform ("FRICK Rechtsanwälte Steuerberater PartG").
+  const nimmDanach = k < segmente.length && !istGenerisch(segmente[k] as string);
+  const bis = nimmDanach ? k + 1 : k;
+  return [segmente.slice(0, bis).join(" "), ...segmente.slice(bis)];
 }
 
 // Eröffnungen, die der Prompt ausdrücklich verbietet, weil sie den Serienbrief
