@@ -1,6 +1,7 @@
 import { schedules, wait } from "@trigger.dev/sdk";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
+import { mitWiederholung } from "./wiederholung";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,10 +48,11 @@ async function ladeDraftRows(
   typ: "EMAIL" | "LINKEDIN",
   limit: number
 ): Promise<QueueRow[]> {
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!A:I`,
-  });
+  const response = await mitWiederholung("Entwuerfe aus der Queue laden", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${QUEUE_TAB}!A:I`,
+    }));
 
   const rows = response.data.values ?? [];
   const result: QueueRow[] = [];
@@ -95,10 +97,15 @@ async function aktualisiereStatus(
     updates.push({ range: `${QUEUE_TAB}!J${rowIndex}`, values: [[fehlerGrund]] });
   }
 
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId: sheetId,
-    requestBody: { valueInputOption: "RAW", data: updates },
-  });
+  // Der wichtigste Wiederholungspunkt der ganzen Kette: die Mail ist an dieser
+  // Stelle bereits bei Brevo. Scheitert der Statusschreiber, bleibt die Zeile auf
+  // DRAFT stehen — und morgen frueh geht dieselbe Mail ein zweites Mal an
+  // denselben Betrieb. Feste Bereiche, also gefahrlos wiederholbar.
+  await mitWiederholung(`Status ${status} in Zeile ${rowIndex} schreiben`, () =>
+    sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { valueInputOption: "RAW", data: updates },
+    }));
 }
 
 // ─── E-Mail Senden ────────────────────────────────────────────────────────────

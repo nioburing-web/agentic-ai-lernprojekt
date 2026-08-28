@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { schedules, wait } from "@trigger.dev/sdk";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
 import { saubererBetriebsname, oeffnerIstFloskel } from "./entwurf-qualitaet";
+import { mitWiederholung } from "./wiederholung";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import OpenAI from "openai";
@@ -59,28 +60,31 @@ const QUEUE_HEADER = ["Typ", "Name", "Stadt", "Kontakt", "Entwurf", "Status", "E
 export type DraftStatus = "DRAFT" | "PRUEFEN";
 
 async function sicherQueueTab(sheets: ReturnType<typeof googleSheets>, sheetId: string): Promise<void> {
-  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+  const spreadsheet = await mitWiederholung("Queue-Tab pruefen", () =>
+    sheets.spreadsheets.get({ spreadsheetId: sheetId }));
   const tabExistiert = spreadsheet.data.sheets?.some(s => s.properties?.title === QUEUE_TAB);
 
   if (!tabExistiert) {
-    await sheets.spreadsheets.batchUpdate({
+    await mitWiederholung("Queue-Tab anlegen", () => sheets.spreadsheets.batchUpdate({
       spreadsheetId: sheetId,
       requestBody: { requests: [{ addSheet: { properties: { title: QUEUE_TAB } } }] },
-    });
+    }));
   }
 
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!A1:I1`,
-  });
-
-  if (!response.data.values?.[0] || response.data.values[0][0] !== "Typ") {
-    await sheets.spreadsheets.values.update({
+  const response = await mitWiederholung("Kopfzeile A1:I1 lesen", () =>
+    sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
       range: `${QUEUE_TAB}!A1:I1`,
-      valueInputOption: "RAW",
-      requestBody: { values: [QUEUE_HEADER] },
-    });
+    }));
+
+  if (!response.data.values?.[0] || response.data.values[0][0] !== "Typ") {
+    await mitWiederholung("Kopfzeile A1:I1 schreiben", () =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${QUEUE_TAB}!A1:I1`,
+        valueInputOption: "RAW",
+        requestBody: { values: [QUEUE_HEADER] },
+      }));
   }
 
   // R/S sind die Demo-Klick-Spalten. J–Q sind belegt (Fehlergrund, Reply-Classifier,
@@ -89,18 +93,20 @@ async function sicherQueueTab(sheets: ReturnType<typeof googleSheets>, sheetId: 
   // T/U kamen mit der Nischen-Verbreiterung dazu: ohne sie lässt sich die
   // Reply-Rate nicht je Kategorie aufschlüsseln, und genau das versteckt sonst
   // den Ausreisser (Lehre aus der Betreff-Monokultur vom 17.07.2026).
-  const kopfRU = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!R1:U1`,
-  });
-  const kopf = kopfRU.data.values?.[0] ?? [];
-  if (kopf[0] !== "Demo-ID" || kopf[3] !== "Kategorie") {
-    await sheets.spreadsheets.values.update({
+  const kopfRU = await mitWiederholung("Kopfzeile R1:U1 lesen", () =>
+    sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
       range: `${QUEUE_TAB}!R1:U1`,
-      valueInputOption: "RAW",
-      requestBody: { values: [["Demo-ID", "Demo geklickt", "Nische", "Kategorie"]] },
-    });
+    }));
+  const kopf = kopfRU.data.values?.[0] ?? [];
+  if (kopf[0] !== "Demo-ID" || kopf[3] !== "Kategorie") {
+    await mitWiederholung("Kopfzeile R1:U1 schreiben", () =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${QUEUE_TAB}!R1:U1`,
+        valueInputOption: "RAW",
+        requestBody: { values: [["Demo-ID", "Demo geklickt", "Nische", "Kategorie"]] },
+      }));
   }
 }
 
@@ -118,10 +124,11 @@ export async function zaehleOffenePruefungen(
   sheets: ReturnType<typeof googleSheets>,
   sheetId: string,
 ): Promise<number> {
-  const antwort = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!F:F`,
-  });
+  const antwort = await mitWiederholung("offene PRUEFEN zaehlen", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${QUEUE_TAB}!F:F`,
+    }));
   const zeilen = antwort.data.values ?? [];
   return zeilen.slice(1).filter((z) => String(z?.[0] ?? "").trim() === "PRUEFEN").length;
 }
@@ -130,10 +137,11 @@ async function ladeVorhandeneKontakte(
   sheets: ReturnType<typeof googleSheets>,
   sheetId: string
 ): Promise<Set<string>> {
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!A:D`,
-  });
+  const response = await mitWiederholung("vorhandene Kontakte laden", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${QUEUE_TAB}!A:D`,
+    }));
   const rows = response.data.values ?? [];
   const kontakte = new Set<string>();
   for (const row of rows.slice(1)) {
@@ -181,18 +189,22 @@ async function speichereDraft(
   // "Tabelle" und fand ab dem 14.07.2026 den Demo-ID-Block in R1:S1 — jede Zeile
   // landete dann in R:AI statt A:I und war für morgen-versand unsichtbar.
   // Deshalb Zielzeile selbst bestimmen und per update fest nach A<n>:U<n> schreiben.
-  const bestand = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${tab}!A:U`,
-  });
+  const bestand = await mitWiederholung(`Zielzeile in ${tab} bestimmen`, () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${tab}!A:U`,
+    }));
   const zielZeile = letzteBelegteZeile(bestand.data.values ?? []) + 1;
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: sheetId,
-    range: `${tab}!A${zielZeile}:U${zielZeile}`,
-    valueInputOption: "RAW",
-    requestBody: { values: [zeile] },
-  });
+  // Wiederholbar, weil der Bereich fest ist: ein zweiter Versuch schreibt
+  // dieselbe Zeile an dieselbe Stelle. Mit `append` waere das eine Dublette.
+  await mitWiederholung(`Entwurf nach ${tab}!A${zielZeile} schreiben`, () =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `${tab}!A${zielZeile}:U${zielZeile}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [zeile] },
+    }));
 }
 
 export const _test = { speichereDraft };
@@ -796,10 +808,11 @@ async function ladeLetzteBetreffe(
   sheetId: string,
   anzahl = 40
 ): Promise<string[]> {
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${QUEUE_TAB}!I:I`,
-  });
+  const response = await mitWiederholung("bisherige Betreffe laden", () =>
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${QUEUE_TAB}!I:I`,
+    }));
   const rows = response.data.values ?? [];
   const betreffe = rows
     .slice(1)
