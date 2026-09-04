@@ -19,15 +19,29 @@ const SCHWELLE = 90;
 async function main() {
   console.log("=== Reply-Agent DRY-RUN (read-only, keine Seiteneffekte) ===\n");
 
-  const emails = await leseUngeleseneEmails();
-  console.log(`Ungelesene E-Mails im Postfach: ${emails.length}\n`);
-  if (emails.length === 0) {
-    console.log("Nichts zu tun. (Sauberer No-Op-Test.)");
-    return;
+  // Seit dem 04.09.2026 entscheidet die Queue, welche Mails ueberhaupt geholt
+  // werden — sie muss deshalb vor dem Postfach geladen sein.
+  const { rows } = await ladeOutreachQueue();
+  console.log(`Outreach-Queue-Zeilen geladen: ${rows.length}`);
+
+  const bekannteKontakte = new Set<string>();
+  for (let i = 1; i < rows.length; i++) {
+    const k = (rows[i]?.[3] ?? "").toLowerCase().trim();
+    if (k) bekannteKontakte.add(k);
   }
 
-  const { rows } = await ladeOutreachQueue();
-  console.log(`Outreach-Queue-Zeilen geladen: ${rows.length}\n`);
+  const posteingang = await leseUngeleseneEmails((a) => bekannteKontakte.has(a));
+  const emails = posteingang.emails;
+  console.log(
+    `Ungelesen gesamt: ${posteingang.ungelesenGesamt} | ` +
+      `Lead-Antworten: ${posteingang.leadsGesamt} | ` +
+      `Massenpost (wuerde \\Seen bekommen): ${posteingang.massenpost.length} | ` +
+      `bleibt ungelesen: ${posteingang.unberuehrt}\n`
+  );
+  if (emails.length === 0) {
+    console.log("Keine Lead-Antworten. (Sauberer No-Op-Test.)");
+    return;
+  }
 
   let termine = 0, entwuerfe = 0, status = 0, unbekannt = 0;
 

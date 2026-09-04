@@ -14,6 +14,8 @@ import {
   formatiereLernbeispiele,
   zuHarvestendeZeilen,
   baueSystemPrompt,
+  istMassenAbsender,
+  waehlePosteingang,
 } from "../src/trigger/reply-classifier";
 
 let bestanden = 0;
@@ -253,6 +255,90 @@ function test14_systemPrompt(): void {
 // --- Alle Tests ausführen ---
 console.log("=== Reply-Classifier Tests ===\n");
 
+// ── Posteingang-Auswahl (04.09.2026) ───────────────────────────────────────
+
+function test15_massenAbsender(): void {
+  const massen = [
+    "updates-noreply@linkedin.com",
+    "notifications-noreply@linkedin.com",
+    "messages-noreply@linkedin.com",
+    "invitations@linkedin.com",
+    "welcome@t.brevo.com",
+    "campaigns@m.brevo.com",
+    "updates@learn.mailgun.com",
+    "MAILER-DAEMON@googlemail.com",
+    // Die eigene Outreach-Adresse: 139 ungelesene Agenten-Reports aus Juni,
+    // deren Versand am 06.07.2026 abgeschaltet wurde.
+    "anfragen@nio-automation.de",
+  ];
+  for (const a of massen) {
+    assert(istMassenAbsender(a) === true, `Massenpost erkannt: ${a}`);
+  }
+
+  // Der wichtigere Teil: was NICHT als Massenpost durchgehen darf. Jede
+  // Fehleinstufung hier markiert echte Post still als gelesen.
+  const echt = [
+    "info@fahrschule-oberfrank.de",
+    "rezeption@artwork-hairdresser.com",
+    "kontakt@bellevue-duesseldorf.de",
+    "info@vip.dominos.de",
+    "praxis@zahnarzt-beispiel.de",
+    "kaputt-ohne-at",
+    "",
+  ];
+  for (const a of echt) {
+    assert(istMassenAbsender(a) === false, `bleibt ungelesen: "${a}"`);
+  }
+}
+
+function test16_posteingangAuswahl(): void {
+  const kandidaten = [
+    { uid: 1, absender: "updates-noreply@linkedin.com" },
+    { uid: 2, absender: "info@fahrschule-oberfrank.de" },
+    { uid: 3, absender: "info@vip.dominos.de" },
+    { uid: 4, absender: "welcome@t.brevo.com" },
+    { uid: 5, absender: "rezeption@artwork-hairdresser.com" },
+  ];
+  const leads = new Set(["info@fahrschule-oberfrank.de", "rezeption@artwork-hairdresser.com"]);
+  const a = waehlePosteingang(kandidaten, (x) => leads.has(x), 50);
+
+  assert(JSON.stringify(a.zuLesen) === "[2,5]", "nur Lead-Absender werden gelesen");
+  assert(JSON.stringify(a.massenpost) === "[1,4]", "Maschinen-Absender gehen auf \\Seen");
+  assert(JSON.stringify(a.unberuehrt) === "[3]", "unbekannter Mensch bleibt ungelesen");
+  assert(a.leadsGesamt === 2, "leadsGesamt zaehlt vor dem Deckel");
+}
+
+function test17_deckelNimmtDasNeueste(): void {
+  // Der eigentliche Bug vom 04.09.2026: aufsteigende UIDs, Deckel vorne, also
+  // wurden die aeltesten genommen. Jetzt muss das Neueste gewinnen.
+  const kandidaten = [10, 20, 30, 40, 50].map((uid) => ({ uid, absender: `lead${uid}@example.de` }));
+  const a = waehlePosteingang(kandidaten, () => true, 2);
+
+  assert(JSON.stringify(a.zuLesen) === "[40,50]", "Deckel nimmt die neuesten UIDs");
+  assert(a.leadsGesamt === 5, "abgeschnittene Treffer bleiben sichtbar (5 statt 2)");
+
+  const leer = waehlePosteingang(kandidaten, () => true, 0);
+  assert(leer.zuLesen.length === 0 && leer.leadsGesamt === 5, "Limit 0 liest nichts, meldet aber 5");
+}
+
+function test18_leadSchlaegtMassenmuster(): void {
+  // Ein Lead, dessen Adresse zufaellig ein Massen-Muster enthaelt, darf niemals
+  // still auf \Seen wandern.
+  const kandidaten = [{ uid: 7, absender: "news@kanzlei-beispiel.de" }];
+  assert(istMassenAbsender("news@kanzlei-beispiel.de") === false, "news@ allein ist kein Massenmuster");
+
+  const heikel = [{ uid: 8, absender: "newsletter@kanzlei-beispiel.de" }];
+  const ohneLead = waehlePosteingang(heikel, () => false, 50);
+  assert(JSON.stringify(ohneLead.massenpost) === "[8]", "newsletter@ ohne Lead-Treffer ist Massenpost");
+
+  const mitLead = waehlePosteingang(heikel, () => true, 50);
+  assert(JSON.stringify(mitLead.zuLesen) === "[8]", "derselbe Absender als Lead wird gelesen");
+  assert(mitLead.massenpost.length === 0, "Lead landet nie in der \\Seen-Liste");
+
+  const a = waehlePosteingang(kandidaten, () => false, 50);
+  assert(JSON.stringify(a.unberuehrt) === "[7]", "unklarer Absender bleibt ungelesen");
+}
+
 test1_interessiert();
 test2_abgelehnt();
 test3_abwesend();
@@ -269,6 +355,10 @@ test11_waehleAusgewogen();
 test12_formatiere();
 test13_harvest();
 test14_systemPrompt();
+test15_massenAbsender();
+test16_posteingangAuswahl();
+test17_deckelNimmtDasNeueste();
+test18_leadSchlaegtMassenmuster();
 
 console.log(
   `\n=== Ergebnis: ${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen ===`

@@ -203,6 +203,99 @@ export function findeLeadRow(rows: string[][], senderEmail: string): LeadRow | n
   return null;
 }
 
+// ── Posteingang-Auswahl ─────────────────────────────────────────────────────
+//
+// Warum es das gibt (04.09.2026): Der Agent holte `uids.slice(0, 50)` aus einer
+// IMAP-Suche. IMAP liefert UIDs **aufsteigend**, das waren also die 50
+// **aeltesten** ungelesenen Mails. Der Posteingang hatte 580 ungelesene, fast
+// alles Newsletter, und der Guardrail laesst alles ungelesen, was keinem Lead
+// zugeordnet werden kann. Damit stand ein Deadlock: jeden Werktag wurden
+// dieselben 50 alten Newsletter geholt, verworfen und ungelesen liegen
+// gelassen, waehrend echte Lead-Antworten auf Position 51-580 nie geholt
+// wurden. Ueber 1509 Queue-Zeilen war genau **eine** als INTERESSIERT und eine
+// als ABGELEHNT erfasst — bei rund 1400 versendeten Mails.
+//
+// Die Auswahl trifft deshalb jetzt der Absender, nicht die Position: erst alle
+// Umschlaege ansehen (billig), dann auf bekannte Kontakte filtern, **danach**
+// deckeln. Der Deckel greift ab jetzt auf die *neuesten* Lead-Antworten, nicht
+// auf die aeltesten Newsletter — und wieviele er abgeschnitten hat, steht im
+// Log. Eine Grenze, die man nicht sieht, ist eine Grenze, die man vergisst.
+
+export type PosteingangKandidat = { uid: number; absender: string };
+
+export type PosteingangAuswahl = {
+  /** UIDs mit Lead-Zuordnung, gedeckelt, aufsteigend (Fetch-Reihenfolge). */
+  zuLesen: number[];
+  /** UIDs von Maschinen-Absendern — duerfen auf \Seen. */
+  massenpost: number[];
+  /** Alles andere: bleibt bewusst ungelesen, das ist echte Post fuer Nio. */
+  unberuehrt: number[];
+  /** Lead-Treffer VOR dem Deckel, damit der Deckel sichtbar wird. */
+  leadsGesamt: number;
+};
+
+// Bewusst nur der Lokalteil und eine kurze Domain-Liste. Ein Absender wird nur
+// dann als Massenpost eingestuft, wenn er sich selbst so nennt — alles
+// Zweifelhafte bleibt ungelesen. Lieber ein Newsletter zuviel im Posteingang
+// als eine echte Anfrage, die niemand mehr sieht.
+const MASSEN_LOKALTEILE = [
+  "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply",
+  "notification", "notifications", "updates", "newsletter", "news-",
+  "mailer-daemon", "postmaster", "bounce", "bounces", "campaigns",
+  "invitations", "digest", "welcome", "marketing", "mailing",
+];
+
+const MASSEN_DOMAINS = ["t.brevo.com", "m.brevo.com"];
+
+// Exakte Adressen. Bisher genau eine: die eigene Outreach-Adresse. Von ihr lagen
+// am 04.09.2026 **139 ungelesene** Mails im Posteingang — die Tagesreports der
+// Agenten aus Juni ("Outreach 09.06.2026: 9/10 gesendet"), deren Versand am
+// 06.07. abgeschaltet wurde. Reines Archiv, nie wieder Post fuer einen Menschen.
+// Ungefaehrlich, weil die Lead-Pruefung vorher laeuft: eine echte Antwort wird
+// ueber die Kontaktspalte erkannt, nicht ueber den Umschlag-Absender.
+const MASSEN_ADRESSEN = ["anfragen@nio-automation.de"];
+
+export function istMassenAbsender(adresse: string): boolean {
+  const a = adresse.toLowerCase().trim();
+  const at = a.lastIndexOf("@");
+  if (at <= 0) return false;
+  if (MASSEN_ADRESSEN.includes(a)) return true;
+  const lokal = a.slice(0, at);
+  const domain = a.slice(at + 1);
+  if (MASSEN_DOMAINS.includes(domain)) return true;
+  return MASSEN_LOKALTEILE.some((m) => lokal.includes(m));
+}
+
+/**
+ * Teilt die ungelesenen Mails in drei Toepfe. `istLead` kommt von aussen
+ * herein, damit diese Funktion ohne Sheet und ohne IMAP testbar bleibt.
+ */
+export function waehlePosteingang(
+  kandidaten: PosteingangKandidat[],
+  istLead: (adresse: string) => boolean,
+  limit: number,
+): PosteingangAuswahl {
+  const leads: number[] = [];
+  const massenpost: number[] = [];
+  const unberuehrt: number[] = [];
+
+  for (const k of kandidaten) {
+    const adresse = k.absender.toLowerCase().trim();
+    // Reihenfolge ist die Sicherung: ein Lead wird nie als Massenpost
+    // eingestuft, auch wenn seine Adresse zufaellig "news" enthaelt.
+    if (adresse && istLead(adresse)) leads.push(k.uid);
+    else if (istMassenAbsender(adresse)) massenpost.push(k.uid);
+    else unberuehrt.push(k.uid);
+  }
+
+  // Beim Deckeln gewinnt das Neueste. Eine Antwort von heute ist mehr wert als
+  // eine von vor drei Wochen, und genau andersherum lief es bisher.
+  const neuesteZuerst = [...leads].sort((a, b) => b - a);
+  const zuLesen = neuesteZuerst.slice(0, Math.max(0, limit)).sort((a, b) => a - b);
+
+  return { zuLesen, massenpost, unberuehrt, leadsGesamt: leads.length };
+}
+
 // Wählt die letzten n Korrekturen, ausgewogen über die richtigen Kategorien.
 // Eingabe ist chronologisch (ältestes zuerst, wie im Sheet).
 export function waehleLernbeispiele(alle: Lernbeispiel[], n: number): Lernbeispiel[] {
@@ -345,16 +438,40 @@ export async function ladeOutreachQueue(): Promise<{
   return { sheets, sheetId, rows: (res.data.values ?? []) as string[][] };
 }
 
-export async function leseUngeleseneEmails(): Promise<EmailData[]> {
+export type PosteingangErgebnis = {
+  emails: EmailData[];
+  /** UIDs, die als Massenpost auf \Seen duerfen. */
+  massenpost: number[];
+  /** Lead-Treffer vor dem Deckel. */
+  leadsGesamt: number;
+  ungelesenGesamt: number;
+  unberuehrt: number;
+};
+
+/**
+ * Holt die ungelesenen Mails, die zu einem Lead gehoeren.
+ *
+ * `istLead` kommt von aussen, weil die Queue dafuer schon geladen sein muss —
+ * das ist die eigentliche Aenderung vom 04.09.2026. Vorher lief es andersherum:
+ * erst 50 Mails blind holen, dann zuordnen. Siehe den Block bei
+ * `waehlePosteingang` fuer den Deadlock, der daraus entstand.
+ */
+export async function leseUngeleseneEmails(
+  istLead: (adresse: string) => boolean,
+  limit = 50,
+): Promise<PosteingangErgebnis> {
   const client = neuerImapClient();
   const emails: EmailData[] = [];
+  let massenpost: number[] = [];
+  let leadsGesamt = 0;
+  let ungelesenGesamt = 0;
+  let unberuehrt = 0;
 
   try {
     await client.connect();
     const lock = await client.getMailboxLock("INBOX");
     try {
-      // Kein Betreff-Filter mehr: alle ungelesenen Antworten holen,
-      // die Lead-Zuordnung filtert später über die Outreach Queue.
+      // Kein Betreff-Filter: alle ungelesenen holen, der Absender entscheidet.
       const uids = await client.search({ seen: false }, { uid: true });
       // imapflow liefert `false`, wenn die Suche selbst fehlschlaegt. Ohne diese
       // Pruefung lief `uids.slice()` in einen TypeError und der Agent stuerzte —
@@ -365,29 +482,62 @@ export async function leseUngeleseneEmails(): Promise<EmailData[]> {
       if (uids === false) {
         throw new Error("IMAP-Suche fehlgeschlagen (search lieferte false) — keine Aussage ueber ungelesene Mails moeglich");
       }
+      ungelesenGesamt = uids.length;
       logger.log(`Ungelesene E-Mails gesamt: ${uids.length}`);
 
-      const zuVerarbeiten = uids.slice(0, 50);
+      // Durchgang 1: nur Umschlaege. Das ist billig genug, um sich ALLE
+      // anzusehen — und genau deshalb muss nicht mehr nach Position gedeckelt
+      // werden, sondern nach Absender.
+      const kandidaten: PosteingangKandidat[] = [];
+      for await (const m of client.fetch(uids, { envelope: true }, { uid: true })) {
+        const f = m.envelope?.from?.[0];
+        const roh = f ? `${f.name ?? ""} <${f.address ?? ""}>`.trim() : "";
+        kandidaten.push({ uid: m.uid, absender: extrahiereEmailAdresse(roh) });
+      }
 
-      for await (const message of client.fetch(
-        zuVerarbeiten,
-        { source: true, envelope: true },
-        { uid: true }
-      )) {
-        try {
-          const subject = message.envelope?.subject ?? "";
-          const fromAddr = message.envelope?.from?.[0];
-          const from = fromAddr
-            ? `${fromAddr.name ?? ""} <${fromAddr.address ?? ""}>`.trim()
-            : "";
-          const rawSource = message.source?.toString("utf-8") ?? "";
-          const body = extrahiereTextAusBody(rawSource);
-          const messageId =
-            message.envelope?.messageId ?? extrahiereMessageId(rawSource);
+      const auswahl = waehlePosteingang(kandidaten, istLead, limit);
+      massenpost = auswahl.massenpost;
+      leadsGesamt = auswahl.leadsGesamt;
+      unberuehrt = auswahl.unberuehrt.length;
 
-          emails.push({ uid: message.uid, subject, from, body, messageId });
-        } catch (err) {
-          logger.error("Fehler beim Lesen einer E-Mail:", { error: String(err) });
+      // Den Deckel sichtbar machen. Eine Grenze, die nur im Code steht, ist
+      // beim naechsten Blick aufs Log unsichtbar — und dann glaubt man der Zahl.
+      if (auswahl.leadsGesamt > auswahl.zuLesen.length) {
+        logger.warn(
+          `Deckel greift: ${auswahl.leadsGesamt} Lead-Antworten gefunden, ` +
+            `nur die ${auswahl.zuLesen.length} neuesten werden verarbeitet.`
+        );
+      }
+      logger.log(
+        `Auswahl: ${auswahl.leadsGesamt} Lead-Antworten, ` +
+          `${auswahl.massenpost.length} Massenpost, ` +
+          `${auswahl.unberuehrt.length} bleiben ungelesen`
+      );
+
+      // Durchgang 2: der volle Text, aber nur fuer die Lead-Antworten.
+      // Bewusst kein frueher `return` hier — der stuende vor `client.logout()`
+      // und liesse die IMAP-Verbindung offen.
+      if (auswahl.zuLesen.length > 0) {
+        for await (const message of client.fetch(
+          auswahl.zuLesen,
+          { source: true, envelope: true },
+          { uid: true }
+        )) {
+          try {
+            const subject = message.envelope?.subject ?? "";
+            const fromAddr = message.envelope?.from?.[0];
+            const from = fromAddr
+              ? `${fromAddr.name ?? ""} <${fromAddr.address ?? ""}>`.trim()
+              : "";
+            const rawSource = message.source?.toString("utf-8") ?? "";
+            const body = extrahiereTextAusBody(rawSource);
+            const messageId =
+              message.envelope?.messageId ?? extrahiereMessageId(rawSource);
+
+            emails.push({ uid: message.uid, subject, from, body, messageId });
+          } catch (err) {
+            logger.error("Fehler beim Lesen einer E-Mail:", { error: String(err) });
+          }
         }
       }
     } finally {
@@ -401,7 +551,7 @@ export async function leseUngeleseneEmails(): Promise<EmailData[]> {
     } catch {}
   }
 
-  return emails;
+  return { emails, massenpost, leadsGesamt, ungelesenGesamt, unberuehrt };
 }
 
 // Findet den Drafts-Ordner über das \Drafts Special-Use-Flag
@@ -695,21 +845,13 @@ export const replyClassifier = schedules.task({
   run: async () => {
     logger.log("=== Reply-Agent gestartet ===");
 
-    // Schritt 1: ungelesene E-Mails laden
-    let emails: EmailData[] = [];
-    try {
-      emails = await leseUngeleseneEmails();
-      logger.log(`${emails.length} ungelesene E-Mails geladen`);
-    } catch (err) {
-      logger.error("Gmail Fehler:", { error: String(err) });
-      return;
-    }
-    if (emails.length === 0) {
-      logger.log("Keine neuen E-Mails. Fertig.");
-      return;
-    }
-
-    // Schritt 2: Outreach Queue laden (für Lead-Zuordnung)
+    // Schritt 1: Outreach Queue laden.
+    //
+    // Sie kommt seit dem 04.09.2026 ZUERST, nicht mehr nach den E-Mails: die
+    // Kontaktspalte entscheidet, welche Mails ueberhaupt geholt werden. Vorher
+    // wurden blind die 50 aeltesten ungelesenen geholt und danach zugeordnet —
+    // bei 580 ungelesenen Newslettern hiess das, dass echte Lead-Antworten nie
+    // an die Reihe kamen.
     let sheets: ReturnType<typeof googleSheets>;
     let sheetId: string;
     let queueRows: string[][];
@@ -717,6 +859,30 @@ export const replyClassifier = schedules.task({
       ({ sheets, sheetId, rows: queueRows } = await ladeOutreachQueue());
     } catch (err) {
       logger.error("Google Sheets Init Fehler:", { error: String(err) });
+      return;
+    }
+
+    const bekannteKontakte = new Set<string>();
+    for (let i = 1; i < queueRows.length; i++) {
+      const k = (queueRows[i]?.[3] ?? "").toLowerCase().trim();
+      if (k) bekannteKontakte.add(k);
+    }
+    logger.log(`Queue: ${bekannteKontakte.size} bekannte Kontaktadressen`);
+
+    // Schritt 1b: ungelesene E-Mails laden, gefiltert auf bekannte Kontakte
+    let emails: EmailData[] = [];
+    let massenpost: number[] = [];
+    try {
+      const p = await leseUngeleseneEmails((a) => bekannteKontakte.has(a));
+      emails = p.emails;
+      massenpost = p.massenpost;
+      logger.log(`${emails.length} Lead-Antworten geladen`);
+    } catch (err) {
+      logger.error("Gmail Fehler:", { error: String(err) });
+      return;
+    }
+    if (emails.length === 0 && massenpost.length === 0) {
+      logger.log("Keine neuen E-Mails. Fertig.");
       return;
     }
 
@@ -745,6 +911,25 @@ export const replyClassifier = schedules.task({
       lock = await imapClient.getMailboxLock("INBOX");
     } catch (err) {
       logger.error("IMAP Verbindung fehlgeschlagen:", { error: String(err) });
+    }
+
+    // Schritt 3b: Massenpost aufräumen.
+    //
+    // Nur Absender, die sich selbst als Maschine ausweisen (noreply, newsletter,
+    // die eigenen Agenten-Reports). Leads sind hier per Konstruktion nie dabei,
+    // `waehlePosteingang` prueft die Queue zuerst. Alles Zweifelhafte bleibt
+    // ungelesen — lieber ein Newsletter zuviel im Posteingang als eine echte
+    // Anfrage, die niemand mehr sieht.
+    let aufgeraeumt = 0;
+    if (imapVerbunden && massenpost.length > 0) {
+      try {
+        await imapClient.messageFlagsAdd(massenpost.join(","), ["\\Seen"], { uid: true });
+        aufgeraeumt = massenpost.length;
+        logger.log(`Massenpost als gelesen markiert: ${aufgeraeumt}`);
+      } catch (err) {
+        // Fail-open: das Aufräumen ist Komfort, die Lead-Antworten sind die Arbeit.
+        logger.error("Massenpost markieren fehlgeschlagen:", { error: String(err) });
+      }
     }
 
     const report: string[] = [];
@@ -830,6 +1015,7 @@ export const replyClassifier = schedules.task({
       `  Entwürfe zur Freigabe:  ${entwuerfe}`,
       `  Nur Status (Absage/Abw): ${nurStatus}`,
       `  Übersprungen (kein Lead): ${unbekannt}`,
+      `  Massenpost aufgeräumt:   ${aufgeraeumt}`,
       `  Neu gelernte Korrekturen:  ${geharvtet}`,
       `  Aktive Lernbeispiele:      ${aktiveBeispiele}`,
       ``,
