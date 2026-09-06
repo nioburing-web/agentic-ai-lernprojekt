@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { schedules, wait } from "@trigger.dev/sdk";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
-import { saubererBetriebsname, oeffnerIstFloskel } from "./entwurf-qualitaet";
+import { saubererBetriebsname, oeffnerIstFloskel, nameIstBrauchbar } from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
 import {
   neuerNachfasszaehler, zaehleEntwurf, zaehleNachfass, nachfassBericht,
@@ -840,11 +840,18 @@ export type EntwurfKontext = {
 
 export async function generiereEmailEntwurf(
   kontext: EntwurfKontext
-): Promise<{ betreff: string; inhalt: string }> {
+): Promise<{ betreff: string; inhalt: string; maengel: string[] }> {
   const {
     firma, stadt, kategorie, nische, websiteText, link,
     betreffIndex = 0, verbrauchteBetreffe = [], nachfassen,
   } = kontext;
+
+  // Was auch im zweiten Anlauf nicht gehalten hat. Bis zum 06.09.2026 stand das
+  // nur als console.log im Trigger.dev-Protokoll, und der Entwurf ging trotzdem
+  // als versandfertig durch. Gemessen am 04.09.: 9 von 30 Entwuerfen rissen die
+  // Hook-Regel auch nach dem Neuversuch. Eine Pruefung, deren Ergebnis niemand
+  // sieht und die nichts aufhaelt, ist keine Pruefung.
+  const maengel: string[] = [];
   const openai = getOpenAI();
   const branche = nische.name;
   const branchenHinweis = nische.hook;
@@ -956,6 +963,7 @@ EMAIL: <email-text>`,
       ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
     } else {
       console.log(`Firmenname auch im 2. Versuch nicht drin für ${firma}`);
+      maengel.push("firmenname fehlt");
     }
   }
 
@@ -979,6 +987,7 @@ EMAIL: <email-text>`,
       ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
     } else {
       console.log(`Hook auch im 2. Versuch übernommen für ${firma}`);
+      maengel.push("branchen-hook woertlich");
     }
   }
 
@@ -1002,6 +1011,7 @@ EMAIL: <email-text>`,
       ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
     } else {
       console.log(`Einstieg auch im 2. Versuch eine Floskel für ${firma}`);
+      maengel.push("floskel-einstieg");
     }
   }
 
@@ -1011,9 +1021,10 @@ EMAIL: <email-text>`,
   ergebnis = { betreff: ergebnis.betreff, inhalt: vereinheitlicheAnrede(ergebnis.inhalt) };
   if (anredeIstGemischt(ergebnis.inhalt)) {
     console.log(`Anrede bleibt gemischt nach Umformung für ${firma} — Regel greift nicht`);
+    maengel.push("anrede gemischt");
   }
 
-  return ergebnis;
+  return { ...ergebnis, maengel };
 }
 
 // Wählt pro Nacht ein zusammenhängendes Städte-Fenster aus der Rotation. Startet
@@ -1137,6 +1148,9 @@ export const nachtRecherche = schedules.task({
     // ── Phase 1: E-Mail-Leads ─────────────────────────────────────────────────
     console.log("Phase 1: E-Mail-Leads recherchieren...");
     let emailGespeichert = 0;
+    // Entwuerfe, die trotz Neuversuch eine Regel rissen und deshalb auf PRUEFEN
+    // stehen. Geht als Zahl in die Rueckgabe, damit der Health-Monitor sie sieht.
+    let mangelhaft = 0;
 
     for (const zielstadt of zielStaedte) {
       if (emailGespeichert >= TAGES_DECKEL) break;
@@ -1184,6 +1198,16 @@ export const nachtRecherche = schedules.task({
                 continue;
               }
 
+              // Namens-Untergrenze, vor dem LLM-Aufruf: Maps liefert gelegentlich
+              // einen Titel, der kein Name ist ("lz" fuer eine Tierarztpraxis,
+              // 04.09.2026). Der Prompt muss den Namen nennen, also stuende er im
+              // ersten Satz. Lieber ueberspringen als falsch anschreiben.
+              const nameFuerMail = saubererBetriebsname(firma.name, zielstadt);
+              if (!nameIstBrauchbar(nameFuerMail)) {
+                console.log(`Firmenname unbrauchbar ("${firma.name}" -> "${nameFuerMail}"): ${website} – übersprungen`);
+                continue;
+              }
+
               const emailDomain = email.split("@")[1]?.toLowerCase() ?? "";
               if (IGNORIERTE_DOMAINS.some(d => emailDomain.includes(d) || firma.name?.toLowerCase().includes(d))) {
                 console.log(`Kammer/Verband übersprungen: ${firma.name} (${email})`);
@@ -1206,7 +1230,8 @@ export const nachtRecherche = schedules.task({
               const entwurf = await generiereEmailEntwurf({
                 // Nicht firma.name: Maps liefert den SEO-Titel, nicht den Namen.
                 // Ungefiltert landet er im ersten Satz der Mail (Fund 27.08.2026).
-                firma: saubererBetriebsname(firma.name, zielstadt),
+                // Oben schon berechnet, weil die Untergrenze davor greift.
+                firma: nameFuerMail,
                 stadt: zielstadt,
                 kategorie,
                 nische,
@@ -1228,14 +1253,28 @@ export const nachtRecherche = schedules.task({
                 continue;
               }
 
+              // Ein Entwurf, der eine Regel auch im zweiten Anlauf reisst, geht
+              // nicht still als versandfertig durch (Fund 06.09.2026). Er landet
+              // auf PRUEFEN, auch wenn die Kategorie sonst direkt DRAFT schreibt.
+              // Vorher war der einzige Unterschied zwischen "Regel gehalten" und
+              // "Regel zweimal gerissen" eine Zeile im Trigger.dev-Protokoll —
+              // dieselbe Bauart wie Betreff (17.07.) und Firmenname (09.08.):
+              // die Regel stand im Prompt, aber nichts hielt sie durch.
+              const zeilenStatus: DraftStatus =
+                entwurf.maengel.length > 0 ? "PRUEFEN" : draftStatus;
+              if (entwurf.maengel.length > 0) {
+                mangelhaft++;
+                console.log(`Auf PRUEFEN wegen ${entwurf.maengel.join(", ")}: ${firma.name}`);
+              }
+
               await speichereDraft(
                 sheets, sheetId, "EMAIL", firma.name, zielstadt, email, entwurf.inhalt, entwurf.betreff, demoId,
-                QUEUE_TAB, draftStatus, nische.name, kategorie.slug
+                QUEUE_TAB, zeilenStatus, nische.name, kategorie.slug
               );
               vorhandene.add(email.toLowerCase());
               emailGespeichert++;
 
-              console.log(`${draftStatus}: ${firma.name} → ${email} (${zielstadt}, ${nische.name}, Demo-ID ${demoId})`);
+              console.log(`${zeilenStatus}: ${firma.name} → ${email} (${zielstadt}, ${nische.name}, Demo-ID ${demoId})`);
               await wait.for({ seconds: 2 });
             } catch (shopErr) {
               console.error(`Shop ${firma.name} übersprungen:`, shopErr);
@@ -1258,6 +1297,11 @@ export const nachtRecherche = schedules.task({
     console.log(
       `=== Nacht-Recherche fertig: ${emailGespeichert} Entwürfe (${kategorie.label}, Status ${draftStatus}) ===`
     );
+    if (mangelhaft > 0) {
+      console.log(
+        `${mangelhaft} davon auf PRUEFEN gesetzt, weil eine Regel auch im 2. Versuch riss — die gehen nicht automatisch raus.`
+      );
+    }
 
     // Siehe morgen-versand: die WARNUNG oben stand bisher nur im Log. Als
     // Rueckgabe kann der agent-health-monitor sie lesen und melden.
@@ -1271,6 +1315,7 @@ export const nachtRecherche = schedules.task({
       entwuerfe: emailGespeichert,
       kategorie: kategorie.label,
       status: draftStatus,
+      mangelhaft,
       nachfassen: bericht,
     };
   },

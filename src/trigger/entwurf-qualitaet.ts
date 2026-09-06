@@ -141,6 +141,38 @@ function zieheFuehrendeNachnamen(
   return [segmente.slice(0, bis).join(" "), ...segmente.slice(bis)];
 }
 
+/**
+ * Ist das ein Name, den man in einem Satz an einen Fremden schreiben kann?
+ *
+ * Warum das eine eigene Prüfung ist und nicht Teil von `saubererBetriebsname`
+ * (Fund 06.09.2026): Am 04.09. trug eine Queue-Zeile den Firmennamen `lz`, und
+ * er leckte in den Mailtext ("Wäre das für lz einen Blick wert?"). Notiert
+ * wurde daraufhin, die Schneideregel schneide zu viel — **das war die falsche
+ * Diagnose.** Die Gegenprobe über alle 1509 Namen der Queue zeigt: `lz` stand
+ * schon so in Spalte B, also genau so, wie Google Maps den Betrieb betitelt
+ * hat. `saubererBetriebsname("lz")` gibt `lz` zurück, weil es nichts zu
+ * schneiden gibt. Die Schneideregel ist unschuldig, sie hat den Fall nur nicht
+ * aufgehalten.
+ *
+ * Der echte Fehler ist eine fehlende Untergrenze: Es gab keine Stelle, die
+ * fragt, ob der Name überhaupt einer ist. `nameIstGenannt()` verlangt danach,
+ * dass er in der Mail vorkommt, und erzwingt so die Peinlichkeit sogar noch.
+ *
+ * Zwei Zeichen sind nie ein Betriebsname. Wer nicht weiß, wie der Laden heißt,
+ * schreibt ihn nicht an — eine Kaltakquise-Mail mit falschem Namen ist
+ * schlechter als keine. Deshalb überspringen und nicht raten: aus der Domain
+ * einen Namen zu basteln wäre wieder eine erfundene Aussage über die Welt.
+ *
+ * Das Kaufmanns-Und zählt als Zeichen des Namens, nicht als Satzzeichen: "K&L"
+ * ist eine echte Kanzlei und muss durchkommen. Ohne diese Ausnahme lag die
+ * Regel bei zwei Zeichen und hätte einen gültigen Namen weggeworfen — gefunden
+ * vom eigenen Test, nicht vom Bestand, weil so ein Name dort noch nicht vorkam.
+ */
+export function nameIstBrauchbar(name: string): boolean {
+  const zeichen = (name ?? "").replace(/[^\p{L}\p{N}&]/gu, "");
+  return zeichen.length >= 3;
+}
+
 // Eröffnungen, die der Prompt ausdrücklich verbietet, weil sie den Serienbrief
 // verraten. Am 27.08.2026 standen sie trotzdem in 2 von 60 Entwürfen.
 const VERBOTENE_OEFFNER = [

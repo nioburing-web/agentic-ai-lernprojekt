@@ -7,7 +7,7 @@
 // 2. Verbotener Beobachtungs-Einstieg: der Prompt untersagt "ich habe gesehen"
 //    ausdrücklich, 2 von 60 Entwürfen fingen trotzdem so an.
 
-import { saubererBetriebsname, oeffnerIstFloskel } from "../src/trigger/entwurf-qualitaet";
+import { saubererBetriebsname, oeffnerIstFloskel, nameIstBrauchbar } from "../src/trigger/entwurf-qualitaet";
 
 let bestanden = 0;
 let fehlgeschlagen = 0;
@@ -161,6 +161,26 @@ check(
   "sauberer Einstieg schlägt nicht an",
 );
 check(!oeffnerIstFloskel(""), "leerer Text wirft nicht");
+
+// ─── nameIstBrauchbar ────────────────────────────────────────────────────────
+//
+// Der Fall vom 04.09.2026: Eine Queue-Zeile trug den Firmennamen "lz", und er
+// landete im Mailtext ("Wäre das für lz einen Blick wert?"). Wichtig für die
+// Diagnose: "lz" kam SO von Google Maps. Die Schneideregel hat nichts
+// kaputtgemacht — es fehlte eine Untergrenze. Belegt am 06.09. durch den Lauf
+// über alle 1509 Namen der Queue (tools/namensregel-gegenprobe.ts).
+
+check(!nameIstBrauchbar("lz"), "zwei Buchstaben sind kein Betriebsname (Fall 04.09.)");
+gleich(
+  saubererBetriebsname("lz", "Stuttgart"),
+  "lz",
+  "saubererBetriebsname laesst 'lz' unveraendert — es gibt nichts zu schneiden",
+);
+check(!nameIstBrauchbar(""), "leerer Name ist unbrauchbar");
+check(!nameIstBrauchbar("  -  "), "nur Satzzeichen ist unbrauchbar");
+check(nameIstBrauchbar("BMW"), "drei Buchstaben reichen — echte Marken sind kurz");
+check(nameIstBrauchbar("K&L"), "'K&L' bleibt brauchbar, das Kaufmanns-Und zaehlt nicht mit");
+check(nameIstBrauchbar("Tierarztpraxis Milz"), "der vollstaendige Name bleibt brauchbar");
 
 console.log(`\n${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen`);
 process.exit(fehlgeschlagen > 0 ? 1 : 0);
