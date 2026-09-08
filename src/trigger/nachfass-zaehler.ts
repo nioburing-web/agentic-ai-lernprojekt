@@ -19,7 +19,7 @@
  */
 
 /** Die vier Pruefungen, die einen zweiten Aufruf ausloesen koennen. */
-export type Nachfassgrund = "betreff" | "name" | "hook" | "einstieg";
+export type Nachfassgrund = "betreff" | "name" | "hook" | "vorlage" | "einstieg";
 
 export type Nachfasszaehler = {
   entwuerfe: number;

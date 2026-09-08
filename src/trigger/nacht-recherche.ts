@@ -470,18 +470,18 @@ export function mailAngles(
       name: "detail-dann-demo",
       struktur: `1. Steig mit EINER konkreten Beobachtung ein, die NUR auf diesen Betrieb zutrifft — ein echtes Detail von ihrer Seite (eine genannte Leistung, ein Schwerpunkt, ein Satz von ihnen). KEINE allgemeine Aussage über fehlende Website-Funktionen.
 2. ${reibung}
-3. Führ den Demo-Link ein: du hast so einen Assistenten gebaut, er läuft, er kann direkt ausprobiert werden.`,
+3. Führ den Demo-Link ein. Inhalt: so etwas gebaut, läuft, direkt anklickbar. Formuliere das selbst, nicht mit diesen Wörtern.`,
     },
     {
       name: "frage-dann-demo",
       struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieses Betriebs).
 2. Stell eine echte, kurze Frage dazu, wie sie Anfragen heute abfangen, wenn gerade niemand frei ist — so wie jemand fragt, der das Thema versteht, nicht wie ein Verkäufer.
-3. Führ den Demo-Link ein als das, was du dazu gebaut hast — er läuft, er ist in zehn Sekunden ausprobiert.`,
+3. Führ den Demo-Link als Antwort auf genau diese Frage ein. Inhalt: läuft, in Sekunden ausprobiert. Eigene Formulierung.`,
     },
     {
       name: "demo-zuerst",
       struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieses Betriebs), kurz gehalten.
-2. Komm SOFORT zum Link: du hast einen Assistenten gebaut, der Anfragen abfängt, Fragen beantwortet und Termine aufnimmt — hier zum Ausprobieren.
+2. Komm SOFORT zum Link. Inhalt in Stichworten, selbst zu formulieren: Assistent gebaut · nimmt Anfragen an · beantwortet Fragen · nimmt Termine auf · sofort anklickbar. Diese Stichworte NICHT als Aufzählung übernehmen, daraus einen eigenen Satz bauen.
 3. Erst DANACH ein Satz dazu, was das für sie hieße (die Anfrage liegt fertig auf dem Tisch, mit ${k.demoFelder}).`,
     },
   ];
@@ -642,6 +642,68 @@ function laengsterGemeinsamerLauf(a: string[], b: string[]): number {
  * Das ist gewollt: eine selbst formulierte Reibung ist schwaecher als eine gute
  * vorgegebene, aber sie steht nicht wortgleich in dreissig anderen Mails.
  */
+/**
+ * Hat der Entwurf die Blickwinkel-Vorlage woertlich uebernommen?
+ *
+ * Zweite Vorlage neben dem Branchen-Hook, gefunden am 08.09.2026: 7 von 24
+ * frisch geschriebenen Entwuerfen trugen denselben Satz "…einen Assistenten
+ * gebaut, der Anfragen abfaengt, Fragen beantwortet und Termine aufnimmt — hier
+ * zum Ausprobieren", direkt aus `mailAngles()`. Die Hook-Pruefung sah ihn nicht,
+ * weil sie nur gegen `nische.hook` vergleicht.
+ *
+ * Gemessen ueber 160 echte Entwuerfe (PRUEFEN + DRAFT + GESENDET), gegen die
+ * hookfreie Struktur, damit sich die beiden Vorlagen nicht ueberlagern:
+ *
+ *    2-5 Woerter Ueberschneidung : 117 Entwuerfe  (normale Sprache)
+ *    6-7 Woerter                 :   0            <- leere Zone
+ *    8-13 Woerter                :  43 Entwuerfe  (Vorlage abgeschrieben)
+ *
+ * Die Schwelle 7 liegt in der leeren Zone: sie trennt sauber und ist gegen
+ * Verschieben unempfindlich. Geraten waere sie nicht besser gewesen, aber auch
+ * nicht belegt — und 27 % der Entwuerfe haengen daran.
+ *
+ * Geprueft wird gegen ALLE Blickwinkel, nicht nur den benutzten: welcher
+ * gezogen wurde, steht nirgends im Sheet, und ein Treffer auf irgendeine
+ * Vorlage ist immer einer zu viel.
+ */
+/**
+ * Vorlagensaetze, die frueher in `mailAngles()` standen und dort nicht mehr
+ * stehen. Sie muessen mitgeprueft werden, sonst macht das Umschreiben der
+ * Vorlage die alten Entwuerfe unsichtbar: die Pruefung vergleicht gegen den
+ * aktuellen Text, und der kennt den abgeschriebenen Satz nicht mehr.
+ *
+ * Am 08.09.2026 genau so passiert — nach dem Umschreiben meldete die
+ * Freigabe-Runde 1 statt 7 Treffern, waehrend alle 7 Entwuerfe unveraendert
+ * in der Queue lagen. Wer hier einen Satz aus der Vorlage nimmt, traegt ihn
+ * hierher.
+ */
+export const ABGELEGTE_VORLAGEN: string[] = [
+  // bis 08.09.2026 im Blickwinkel "demo-zuerst"
+  "Komm SOFORT zum Link: du hast einen Assistenten gebaut, der Anfragen abfängt, Fragen beantwortet und Termine aufnimmt — hier zum Ausprobieren.",
+  // bis 08.09.2026 im Blickwinkel "detail-dann-demo"
+  "Führ den Demo-Link ein: du hast so einen Assistenten gebaut, er läuft, er kann direkt ausprobiert werden.",
+  // bis 08.09.2026 im Blickwinkel "frage-dann-demo"
+  "Führ den Demo-Link ein als das, was du dazu gebaut hast — er läuft, er ist in zehn Sekunden ausprobiert.",
+];
+
+/**
+ * Alles, was als "Vorlage" gilt: die aktuellen Blickwinkel ohne Hook plus die
+ * abgelegten. EINE Stelle, damit Generator und Freigabe-Runde dieselbe Liste
+ * benutzen — zwei Listen wuerden driften, und die schwaechere staende dort,
+ * wo entschieden wird.
+ */
+export function vorlagenFuer(k: Kategorie, n: Nische): string[] {
+  return [...mailAngles(k, n, true).map((a) => a.struktur), ...ABGELEGTE_VORLAGEN];
+}
+
+export function vorlageIstAbgeschrieben(
+  inhalt: string,
+  strukturen: string[],
+  minLauf = 7
+): boolean {
+  return strukturen.some((s) => hookIstAbgeschrieben(inhalt, s, minLauf));
+}
+
 export function brancheZeileFuer(hook: string, ausblenden: boolean): string {
   if (ausblenden) {
     return "(Zur Branche wird dir diesmal bewusst nichts vorgegeben — beschreibe die Reibung im Alltag dieses Betriebs mit eigenen Worten.)";
@@ -1041,7 +1103,30 @@ EMAIL: <email-text>`,
     }
   }
 
-  // Vierte Prüfung, gleiche Bauart wie die drei darüber: Der Prompt verbietet
+  // Vierte Prüfung, gefunden am 08.09.2026 beim Lesen der frisch geschriebenen
+  // Entwürfe: 7 von 24 trugen denselben Satz aus der Blickwinkel-Vorlage. Die
+  // Hook-Prüfung sah ihn nicht — sie vergleicht nur gegen nische.hook. Dieselbe
+  // Bauart wie oben: erkennen, einmal gezielt nachfassen, Ergebnis prüfen.
+  const strukturenOhneHook = vorlagenFuer(kategorie, nische);
+  if (vorlageIstAbgeschrieben(ergebnis.inhalt, strukturenOhneHook)) {
+    console.log(`Blickwinkel-Vorlage wörtlich übernommen – Neuversuch für ${firma}`);
+    const nachgefasst = await erzeuge(
+      `Ein Satz der Mail ist Wort für Wort aus der Struktur-Vorgabe abgeschrieben. Die Vorgabe sagt, WAS in die Mail soll, nicht wie es klingen muss — und dieselbe Zeile geht heute Nacht an dutzende andere Betriebe. Gib denselben Betreff und dieselbe Mail erneut aus, aber formuliere die Stelle über den Assistenten und den Link komplett in eigenen Worten, aus Sicht von ${firma}. Sonst nichts ändern. Wieder im Format BETREFF: / EMAIL:.`
+    );
+    const vorlageGeloest =
+      !vorlageIstAbgeschrieben(nachgefasst.inhalt, strukturenOhneHook) &&
+      nameIstGenannt(nachgefasst.inhalt, firma) &&
+      nachgefasst.inhalt.includes(link);
+    zaehleNachfass(nachfassen, "vorlage", vorlageGeloest);
+    if (vorlageGeloest) {
+      ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
+    } else {
+      console.log(`Vorlage auch im 2. Versuch übernommen für ${firma}`);
+      maengel.push("blickwinkel-vorlage woertlich");
+    }
+  }
+
+  // Fünfte Prüfung, gleiche Bauart wie die vier darüber: Der Prompt verbietet
   // den Beobachtungs-Einstieg ausdrücklich und bekam ihn am 27.08. trotzdem in
   // 2 von 60 Entwürfen. Hier hilft kein Umformen — welcher Satz stattdessen
   // dastehen soll, weiß nur das Modell.

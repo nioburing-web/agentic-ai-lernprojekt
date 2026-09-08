@@ -9,6 +9,8 @@ import {
   nameIstGenannt,
   hookIstAbgeschrieben,
   betreffIstBrauchbar,
+  vorlageIstAbgeschrieben,
+  vorlagenFuer,
 } from "../src/trigger/nacht-recherche";
 import { oeffnerIstFloskel } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
@@ -24,6 +26,20 @@ export function hookZurNische(nischenName: string): string | null {
     for (const n of k.nischen) if (n.name === nischenName) return n.hook;
   }
   return null;
+}
+
+/**
+ * Die Blickwinkel-Vorlagen zu einer Nische, ohne den Hook — der hat seine
+ * eigene Prüfung, sonst meldet ein Hook-Verstoß hier ein zweites Mal.
+ * Welcher Blickwinkel gezogen wurde, steht nirgends im Sheet, also alle.
+ */
+export function strukturenZurNische(nischenName: string): string[] {
+  for (const k of KATEGORIEN) {
+    for (const n of k.nischen) {
+      if (n.name === nischenName) return vorlagenFuer(k, n);
+    }
+  }
+  return [];
 }
 
 /**
@@ -52,6 +68,15 @@ export function regelBefunde(
   const hook = hookZurNische(zeile.nische);
   if (hook === null) out.push(`Nische "${zeile.nische}" unbekannt — Hook-Regel ungeprüft`);
   else if (hookIstAbgeschrieben(zeile.entwurf, hook)) out.push("Branchen-Hook wörtlich übernommen");
+
+  // Zweite Vorlage neben dem Hook (Befund 08.09.2026): 7 von 24 Entwürfen
+  // trugen denselben Satz aus mailAngles(). Gemessen über 160 echte Entwürfe
+  // liegt zwischen normaler Sprachüberschneidung (≤5 Wörter) und Abschreiben
+  // (≥8 Wörter) eine leere Zone — die Schwelle 7 sitzt darin.
+  const strukturen = strukturenZurNische(zeile.nische);
+  if (strukturen.length && vorlageIstAbgeschrieben(zeile.entwurf, strukturen)) {
+    out.push("Blickwinkel-Vorlage wörtlich übernommen");
+  }
 
   if (oeffnerIstFloskel(zeile.entwurf)) out.push("Floskel-Einstieg");
   if (!betreffIstBrauchbar(zeile.betreff, verbrauchteBetreffe)) {
