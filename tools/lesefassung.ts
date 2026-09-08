@@ -23,11 +23,12 @@ import { regelBefunde } from "./freigabe-pruefung";
 import { anredeIstGemischt } from "../src/trigger/anrede";
 
 const QUEUE_TAB = "Outreach Queue";
-const ZIEL = process.argv[2];
-if (!ZIEL) {
+const zielArg = process.argv[2];
+if (!zielArg) {
   console.error("Zielpfad fehlt. Aufruf: npx tsx tools/lesefassung.ts <zielpfad.md>");
   process.exit(1);
 }
+const ZIEL: string = zielArg;
 
 function ladeEnv(): void {
   if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
