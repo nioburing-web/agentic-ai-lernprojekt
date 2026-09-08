@@ -453,12 +453,23 @@ export function demoLink(demoId: string, profil: DemoProfil = "werkstatt"): stri
 // und "Name, Fahrzeug, Anliegen, Wunschzeit" fest im Text — die Strukturen waren
 // damit für jede andere Nische unbrauchbar. Jetzt kommt das Branchen-Vokabular
 // als Parameter aus nischen.ts.
-export function mailAngles(k: Kategorie, n: Nische): { name: string; struktur: string }[] {
+export function mailAngles(
+  k: Kategorie,
+  n: Nische,
+  hookAusblenden = false
+): { name: string; struktur: string }[] {
+  // Zweiter Weg des Hooks in den Prompt, neben der Hintergrundwissen-Zeile.
+  // Am 08.09.2026 wurde nur die andere Stelle ausgeblendet — der Neuversuch
+  // scheiterte weiter in 4 von 5 Faellen, weil der Satz hier noch stand.
+  // Ein Flag fuer beide Stellen, damit sie nicht wieder auseinanderlaufen.
+  const reibung = hookAusblenden
+    ? "EIN Satz zur Reibung im Alltag dieses Betriebs, komplett in eigenen Worten — dir wird dazu diesmal bewusst nichts vorgegeben."
+    : `EIN Satz zur Reibung, sinngemäß und in eigenen Worten: ${n.hook}`;
   return [
     {
       name: "detail-dann-demo",
       struktur: `1. Steig mit EINER konkreten Beobachtung ein, die NUR auf diesen Betrieb zutrifft — ein echtes Detail von ihrer Seite (eine genannte Leistung, ein Schwerpunkt, ein Satz von ihnen). KEINE allgemeine Aussage über fehlende Website-Funktionen.
-2. EIN Satz zur Reibung, sinngemäß und in eigenen Worten: ${n.hook}
+2. ${reibung}
 3. Führ den Demo-Link ein: du hast so einen Assistenten gebaut, er läuft, er kann direkt ausprobiert werden.`,
     },
     {
@@ -616,6 +627,28 @@ function laengsterGemeinsamerLauf(a: string[], b: string[]): number {
  * teilen. Ein Ähnlichkeitsmaß über den ganzen Satz würde erlaubte Umformulierungen
  * mitflaggen und die Prüfung damit wertlos machen.
  */
+/**
+ * Die Branchen-Zeile im Auftrag — mit Hook oder ohne.
+ *
+ * `ausblenden` ist der zweite Anlauf, nachdem der erste den Hook woertlich
+ * uebernommen hat. Dann steht der Satz gar nicht mehr im Auftrag, statt nur
+ * mit einem Verbot versehen zu sein: `erzeuge()` haengt die Nachfass-Anweisung
+ * an dieselbe Nachrichtenliste, und das Modell sieht seinen eigenen Entwurf
+ * nie — nur den Auftrag. Solange der Hook darin steht, ist Abschreiben der
+ * bequemste erlaubte Weg. Am 08.09.2026 trugen deshalb vier Tierarztpraxen in
+ * Bremen dieselben 19 Woerter, 8 von 11 Hook-Neuversuchen scheiterten.
+ *
+ * Ohne Hook faellt die Mail auf den Website-Auszug und die Struktur zurueck.
+ * Das ist gewollt: eine selbst formulierte Reibung ist schwaecher als eine gute
+ * vorgegebene, aber sie steht nicht wortgleich in dreissig anderen Mails.
+ */
+export function brancheZeileFuer(hook: string, ausblenden: boolean): string {
+  if (ausblenden) {
+    return "(Zur Branche wird dir diesmal bewusst nichts vorgegeben — beschreibe die Reibung im Alltag dieses Betriebs mit eigenen Worten.)";
+  }
+  return `Hintergrundwissen zur Branche (nur Kontext, NICHT wörtlich übernehmen): ${hook}`;
+}
+
 export function hookIstAbgeschrieben(inhalt: string, hook: string, minLauf = 7): boolean {
   const hookWorte = wortfolge(hook);
   const textWorte = wortfolge(inhalt);
@@ -857,15 +890,25 @@ export async function generiereEmailEntwurf(
   const branchenHinweis = nische.hook;
   const websiteAuszug = websiteText && websiteText.trim().length > 80 ? websiteText.trim().slice(0, 1800) : "";
   const betreffAngle = waehleBetreffAngle(betreffIndex);
-  const angles = mailAngles(kategorie, nische);
-
   // Ohne brauchbaren Website-Auszug ist keine echte Personalisierung möglich →
-  // immer "demo-zuerst" (Link statt erfundener Beobachtung).
-  const angle = websiteAuszug
-    ? angles[Math.floor(Math.random() * angles.length)]!
-    : angles[2]!;
+  // immer "demo-zuerst" (Link statt erfundener Beobachtung). Der Index wird
+  // EINMAL gezogen, damit der Neuversuch dieselbe Struktur bekommt und sich
+  // nur der Hook unterscheidet.
+  const angleIndex = websiteAuszug
+    ? Math.floor(Math.random() * mailAngles(kategorie, nische).length)
+    : 2;
 
-  const nachrichten = [
+  // Der Neuversuch bekommt den Hook NICHT mehr zu sehen (08.09.2026). Vorher
+  // hing `erzeuge()` die Nachfass-Anweisung an dieselbe Nachrichtenliste, in der
+  // der Hook woertlich steht — und das Modell sieht seinen eigenen ersten
+  // Entwurf gar nicht, nur den Auftrag. Es schrieb den Satz also erneut ab:
+  // am 08.09. trugen vier Tierarztpraxen in Bremen dieselben 19 Woerter.
+  // Den Satz im Nachfass nicht zu wiederholen reichte nicht, er musste weg —
+  // und zwar an BEIDEN Stellen: der Hintergrundwissen-Zeile und der Struktur
+  // aus mailAngles(). Der erste Anlauf des Fixes traf nur die erste, deshalb
+  // scheiterte der Neuversuch weiter in 4 von 5 Faellen. Ein Schalter fuer
+  // beide, sonst laufen sie beim naechsten Mal wieder auseinander.
+  const baueNachrichten = (hookAusblenden: boolean) => [
       {
         role: "system" as const,
         content: "Du bist Nio Büring, 19 Jahre alt aus Hamburg. Du schreibst Kaltakquise-E-Mails — so als hättest du dir wirklich kurz die Website der Firma angeschaut und schreibst direkt drauflos. Kein Marketingsprech, keine Floskeln, kein Ausrufezeichen. Klingt wie von einem echten Menschen getippt, nicht wie KI. Du erfindest NIE Fakten über die Firma und NIE Ergebnisse oder Referenzkunden — du hast noch keine vorzuweisen. Deine Glaubwürdigkeit kommt aus Spezifität, nicht aus behaupteten Erfolgen.",
@@ -874,10 +917,10 @@ export async function generiereEmailEntwurf(
         role: "user" as const,
         content: `Schreibe eine kurze Kaltakquise-E-Mail an ${firma} in ${stadt} (${branche}).
 ${websiteAuszug ? `\nAuszug von DEREN Website (nur das hier ist echt — beziehe deine Beobachtung darauf):\n"""${websiteAuszug}"""\n` : "\n(Kein brauchbarer Website-Auszug vorhanden — erfinde KEINE Beobachtung über die Firma.)\n"}
-Hintergrundwissen zur Branche (nur Kontext, NICHT wörtlich übernehmen): ${branchenHinweis}
+${brancheZeileFuer(branchenHinweis, hookAusblenden)}
 
 Struktur für DIESE Mail:
-${angle.struktur}
+${mailAngles(kategorie, nische, hookAusblenden)[angleIndex]!.struktur}
 
 DAS HERZSTÜCK DIESER MAIL — der Demo-Link:
 Du hast einen digitalen Assistenten für ${kategorie.zielgruppe} gebaut. Er läuft, man kann ihn sofort anklicken und selbst mit ihm schreiben. ${kategorie.demoBeschreibung} Er nimmt dabei auf: ${kategorie.demoFelder}.
@@ -916,14 +959,17 @@ EMAIL: <email-text>`,
       },
   ];
 
-  async function erzeuge(extra?: string): Promise<{ betreff: string; inhalt: string }> {
+  const nachrichten = baueNachrichten(false);
+
+  async function erzeuge(extra?: string, ohneHook = false): Promise<{ betreff: string; inhalt: string }> {
+    const basis = ohneHook ? baueNachrichten(true) : nachrichten;
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.9,
       max_tokens: 350,
       messages: extra
-        ? [...nachrichten, { role: "user" as const, content: extra }]
-        : nachrichten,
+        ? [...basis, { role: "user" as const, content: extra }]
+        : basis,
     });
     const raw = completion.choices[0]?.message?.content?.trim() ?? "";
     return {
@@ -974,8 +1020,12 @@ EMAIL: <email-text>`,
   // ihn zu wiederholen wäre die sicherste Art, ihn wieder abgeschrieben zu bekommen.
   if (hookIstAbgeschrieben(ergebnis.inhalt, branchenHinweis)) {
     console.log(`Hook wörtlich übernommen – Neuversuch für ${firma}`);
+    // Zweiter Anlauf OHNE den Hook im Auftrag. Der Text sagt das auch so — eine
+    // Anweisung, die sich auf einen Satz bezieht, der nicht mehr dasteht, waere
+    // nur eine weitere Prompt-Regel ohne Griff.
     const nachgefasst = await erzeuge(
-      `Ein Satz der Mail ist Wort für Wort aus dem Hintergrundwissen zur Branche abgeschrieben. Genau das darf nicht passieren — dieselbe Zeile geht heute Nacht an dutzende weitere Betriebe derselben Branche. Gib denselben Betreff und dieselbe Mail erneut aus, aber formuliere den Satz zur Reibung komplett neu: andere Wörter, anderer Satzbau, gern aus Sicht von ${firma} statt allgemein über die Branche. Sonst nichts ändern. Wieder im Format BETREFF: / EMAIL:.`
+      `Der letzte Versuch hat den vorgegebenen Branchensatz Wort für Wort übernommen. Dieselbe Zeile geht heute Nacht an dutzende weitere Betriebe derselben Branche — deshalb steht sie in diesem Auftrag gar nicht mehr. Schreib die Mail neu und formuliere die Reibung im Alltag von ${firma} mit eigenen Worten, konkret auf diesen Betrieb bezogen statt allgemein über die Branche. Alles andere bleibt wie vorgegeben. Wieder im Format BETREFF: / EMAIL:.`,
+      true
     );
     // Nur übernehmen, wenn der zweite Versuch das Problem wirklich löst — und
     // dabei nicht den Firmennamen verliert, den der Schritt davor gerettet hat.

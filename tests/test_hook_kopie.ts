@@ -9,7 +9,9 @@
 // Dasselbe Muster wie die Betreff-Monokultur vom 17.07.: dem Prompt vertraut,
 // das Ergebnis nie geprüft.
 
-import { hookIstAbgeschrieben } from "../src/trigger/nacht-recherche";
+import { hookIstAbgeschrieben, brancheZeileFuer, mailAngles } from "../src/trigger/nacht-recherche";
+import { KATEGORIEN } from "../src/trigger/nischen";
+import { readFileSync } from "node:fs";
 
 let bestanden = 0;
 let fehlgeschlagen = 0;
@@ -121,6 +123,96 @@ check(
   ),
   "Schwelle 4 greift, wo Schwelle 7 durchlässt",
 );
+
+// -- Der Hook verschwindet im zweiten Anlauf (08.09.2026) -------------------
+// Erkennen allein reichte nicht: 8 von 11 Hook-Neuversuchen scheiterten, weil
+// `erzeuge()` die Nachfass-Anweisung an dieselbe Nachrichtenliste haengt und
+// das Modell seinen eigenen Entwurf nie sieht - nur den Auftrag, in dem der
+// Hook weiter stand. Vier Tierarztpraxen in Bremen trugen dieselben 19 Woerter.
+
+const mitHook = brancheZeileFuer(HOOK_TIERARZT, false);
+check(mitHook.includes(HOOK_TIERARZT), "erster Anlauf traegt den Hook im Auftrag");
+
+const ohneHook = brancheZeileFuer(HOOK_TIERARZT, true);
+check(!ohneHook.includes(HOOK_TIERARZT), "zweiter Anlauf traegt den Hook NICHT mehr");
+check(
+  !ohneHook.toLowerCase().includes("tierbesitzer") && !ohneHook.toLowerCase().includes("termin"),
+  "die Ersatzzeile enthaelt auch keine Bruchstuecke des Hooks",
+);
+check(ohneHook.trim().length > 40, "die Ersatzzeile sagt, was stattdessen zu tun ist");
+check(
+  brancheZeileFuer("", true) === brancheZeileFuer(HOOK_TIERARZT, true),
+  "die Ersatzzeile haengt nicht vom Hook ab",
+);
+
+// Quelltext-Pruefung, bewusst als solche benannt: dass die Zeile ohne Hook
+// existiert, nuetzt nichts, wenn der Neuversuch sie nicht anfordert. Ohne
+// Stub-Punkt fuer den OpenAI-Client ist das die einzige Stelle, an der ein
+// spaeteres Entfernen des Schalters auffiele.
+const quelle = readFileSync(new URL("../src/trigger/nacht-recherche.ts", import.meta.url), "utf8");
+const von = quelle.indexOf("hookIstAbgeschrieben(ergebnis.inhalt, branchenHinweis)");
+const bis = quelle.indexOf("const hookGeloest");
+const hookNeuversuch = von >= 0 && bis > von ? quelle.slice(von, bis) : "";
+check(hookNeuversuch.length > 0, "der Hook-Neuversuch ist im Quelltext auffindbar");
+check(
+  /,\s*true\s*\)/.test(hookNeuversuch),
+  "der Hook-Neuversuch ruft erzeuge() mit ohneHook = true",
+);
+check(
+  !hookNeuversuch.includes("aus dem Hintergrundwissen zur Branche abgeschrieben"),
+  "die Nachfass-Anweisung verweist nicht mehr auf einen Satz, der gar nicht mehr dasteht",
+);
+
+
+// -- Der Hook hat ZWEI Wege in den Prompt, nicht einen ----------------------
+// Der erste Anlauf des Fixes am 08.09.2026 blendete nur die Hintergrundwissen-
+// Zeile aus. Der Neuversuch scheiterte weiter in 4 von 5 Faellen, weil
+// mailAngles() den Hook ein zweites Mal in die Struktur-Anweisung backt.
+// Dieser Test zaehlt beide Wege ueber ALLE Nischen ab, nicht ueber eine.
+
+let nischenGeprueft = 0;
+let strukturMitHook = 0;
+let strukturOhneHook = 0;
+
+for (const k of KATEGORIEN) {
+  for (const n of k.nischen) {
+    nischenGeprueft++;
+    const sichtbar = mailAngles(k, n, false).map((a) => a.struktur).join("\n");
+    const versteckt = mailAngles(k, n, true).map((a) => a.struktur).join("\n");
+    if (sichtbar.includes(n.hook)) strukturMitHook++;
+    if (versteckt.includes(n.hook)) strukturOhneHook++;
+  }
+}
+
+check(nischenGeprueft >= 12, `alle Nischen geprueft (${nischenGeprueft})`);
+check(strukturMitHook === nischenGeprueft, "im ersten Anlauf traegt jede Struktur den Hook");
+check(
+  strukturOhneHook === 0,
+  `im zweiten Anlauf traegt KEINE Struktur den Hook (gefunden: ${strukturOhneHook})`,
+);
+
+// Und nicht nur der ganze Satz: auch keine lange woertliche Passage daraus.
+let langePassage = 0;
+for (const k of KATEGORIEN) {
+  for (const n of k.nischen) {
+    const versteckt = mailAngles(k, n, true).map((a) => a.struktur).join("\n");
+    if (hookIstAbgeschrieben(versteckt, n.hook)) langePassage++;
+  }
+}
+check(langePassage === 0, `keine Struktur enthaelt eine lange Passage des Hooks (${langePassage})`);
+
+// Beide Wege haengen an DEMSELBEN Schalter. Wuerde jemand nur einen umstellen,
+// faellt es hier auf: der komplette Auftrag darf den Hook nicht mehr tragen.
+for (const k of KATEGORIEN) {
+  for (const n of k.nischen) {
+    const auftrag = brancheZeileFuer(n.hook, true) + "\n" + mailAngles(k, n, true).map((a) => a.struktur).join("\n");
+    if (auftrag.includes(n.hook)) {
+      check(false, `Auftrag ohne Hook enthaelt ihn trotzdem: ${n.name}`);
+    }
+  }
+}
+check(true, "kein Auftrag mit ausgeblendetem Hook traegt ihn noch");
+
 
 console.log(`\n${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen`);
 process.exit(fehlgeschlagen > 0 ? 1 : 0);
