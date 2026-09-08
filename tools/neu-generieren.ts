@@ -40,7 +40,7 @@
  * OpenAI-Tokenlimit (200k TPM).
  */
 
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, statSync } from "node:fs";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import {
@@ -50,6 +50,8 @@ import {
   nameIstGenannt,
   betreffIstBrauchbar,
 } from "../src/trigger/nacht-recherche";
+import { oeffnerIstFloskel } from "../src/trigger/entwurf-qualitaet";
+import { anredeIstGemischt } from "../src/trigger/anrede";
 import { KATEGORIEN } from "../src/trigger/nischen";
 import type { Kategorie, Nische } from "../src/trigger/nischen";
 
@@ -95,17 +97,47 @@ function linkAusEntwurf(entwurf: string, demoId: string): string | null {
   return null;
 }
 
+/**
+ * Wartet das Tokenlimit ab, statt am 429 zu sterben. OpenAI nennt die Wartezeit
+ * selbst in `retry-after-ms`; ohne den Header wird verdoppelt. Nur Tokenlimits
+ * werden wiederholt — ein 401 oder ein kaputter Prompt soll sofort auffallen.
+ */
+async function mitTokenlimit<T>(was: string, aufgabe: () => Promise<T>): Promise<T> {
+  const MAX = 5;
+  let warten = 5000;
+  for (let versuch = 1; ; versuch++) {
+    try {
+      return await aufgabe();
+    } catch (e) {
+      const fehler = e as { status?: number; headers?: Record<string, string> };
+      if (fehler.status !== 429 || versuch >= MAX) throw e;
+      const genannt = Number(fehler.headers?.["retry-after-ms"] ?? 0);
+      const pause = Math.max(genannt + 1000, warten);
+      console.log(`  Tokenlimit bei ${was} — warte ${(pause / 1000).toFixed(1)}s (Versuch ${versuch}/${MAX})`);
+      await new Promise((r) => setTimeout(r, pause));
+      warten *= 2;
+    }
+  }
+}
+
 function befunde(inhalt: string, betreff: string, z: Zeile, andere: string[]): string[] {
   const out: string[] = [];
   if (hookIstAbgeschrieben(inhalt, z.nische.hook)) out.push("Hook wörtlich");
   if (!nameIstGenannt(inhalt, z.firma)) out.push("Firmenname fehlt");
   if (!betreffIstBrauchbar(betreff, andere)) out.push("Betreff unbrauchbar/doppelt");
-  const du = inhalt.match(/\b(?:du|dir|dich|dein\w*)\b/gi) ?? [];
-  const ihr = inhalt.match(/\b(?:ihr|euch|eure\w*|euer)\b/gi) ?? [];
-  if (z.kategorie.slug !== "b2b-kleinbetriebe" && du.length > 0 && ihr.length > 0) {
+  // Beide Prüfungen kommen aus derselben Quelle wie in nacht-recherche. Vorher
+  // standen hier zwei Nachbauten: /Ich habe gesehen, dass|Mir ist aufgefallen/
+  // und eine eigene du/ihr-Zählung.
+  //
+  // Der Nachbau war gross geschrieben und hatte kein i-Flag. Am 08.09.2026
+  // fing er Zeile 1546 deshalb nicht ab — die Mail beginnt mit "Hey, ich habe
+  // gesehen, dass ...", klein nach der Anrede. Der Lauf schrieb den Entwurf als
+  // "sauber" ins Sheet, während die echte Prüfung ihn markiert. Zwei Fassungen
+  // derselben Regel driften immer; hier reichte ein fehlendes Flag.
+  if (z.kategorie.slug !== "b2b-kleinbetriebe" && anredeIstGemischt(inhalt)) {
     out.push("du/ihr gemischt");
   }
-  if (/Ich habe gesehen, dass|Mir ist aufgefallen/.test(inhalt)) out.push("Floskel-Einstieg");
+  if (oeffnerIstFloskel(inhalt)) out.push("Floskel-Einstieg");
   return out;
 }
 
@@ -161,6 +193,16 @@ async function main(): Promise<void> {
   if (UEBERNEHMEN) {
     if (!existsSync(ERGEBNIS_DATEI)) {
       throw new Error(`${ERGEBNIS_DATEI} fehlt — erst den Probelauf ohne --uebernehmen fahren`);
+    }
+    // Eine alte Ergebnisdatei sieht aus wie eine frische. Am 08.09.2026 stand
+    // dort nach einem abgebrochenen Lauf noch der Stand vom 13.08. — 26 Tage
+    // alte Entwürfe waren einen Tastendruck davon entfernt, ins Sheet zu gehen.
+    const alterStunden = (Date.now() - statSync(ERGEBNIS_DATEI).mtimeMs) / 3_600_000;
+    if (alterStunden > 6) {
+      throw new Error(
+        `${ERGEBNIS_DATEI} ist ${alterStunden.toFixed(1)} Stunden alt — das ist nicht das Ergebnis ` +
+          `eines Probelaufs von eben. Erst neu erzeugen, dann übernehmen.`
+      );
     }
     const gespeichert: { range: string; values: string[][] }[] = JSON.parse(
       readFileSync(ERGEBNIS_DATEI, "utf-8")
@@ -256,16 +298,18 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const neu = await generiereEmailEntwurf({
-      firma: z.firma,
-      stadt: z.stadt,
-      kategorie: z.kategorie,
-      nische: z.nische,
-      websiteText: text,
-      link: z.link,
-      betreffIndex: idx,
-      verbrauchteBetreffe: [...alleBetreffe, ...neueBetreffe],
-    });
+    const neu = await mitTokenlimit(`${z.nr} ${z.firma}`, () =>
+      generiereEmailEntwurf({
+        firma: z.firma,
+        stadt: z.stadt,
+        kategorie: z.kategorie,
+        nische: z.nische,
+        websiteText: text,
+        link: z.link,
+        betreffIndex: idx,
+        verbrauchteBetreffe: [...alleBetreffe, ...neueBetreffe],
+      })
+    );
 
     // Ohne den Link ist die Mail wertlos — der Klick ist das einzige Signal.
     if (!neu.inhalt.includes(z.demoId)) {
@@ -284,6 +328,11 @@ async function main(): Promise<void> {
     neueBetreffe.push(neu.betreff);
     updates.push({ range: `E${z.nr}`, values: [[neu.inhalt]] });
     updates.push({ range: `I${z.nr}`, values: [[neu.betreff]] });
+
+    // Nach JEDER Zeile sichern, nicht erst am Ende. Am 08.09.2026 brach der Lauf
+    // nach rund 20 bezahlten Entwürfen am Tokenlimit ab und hinterliess eine
+    // Ergebnisdatei vom 13.08. — die Arbeit war weg, die Datei sah gültig aus.
+    writeFileSync(ERGEBNIS_DATEI, JSON.stringify(updates, null, 1), "utf-8");
   }
 
   console.log(`\nneu geschrieben: ${updates.length / 2} · davon ohne Befund: ${sauber} · unverändert gelassen: ${unveraendert}`);

@@ -11,8 +11,15 @@
  * entscheidbar ist (Anrede, kaputte Adresse, Platzhalter-Adresse), und legt
  * alles Übrige zum Lesen vor. Die Fit-Frage bleibt bei einem Menschen.
  *
+ * Seit dem 08.09.2026 laufen zusätzlich die echten Regelprüfungen aus
+ * nacht-recherche noch einmal über jede Zeile (siehe freigabe-pruefung.ts).
+ * Grund: der Mangel steht nur im Run-Log, nie im Sheet — die Runde meldete
+ * deshalb null Befunde bei 23 defekten Entwürfen. Was einen Befund hat, nimmt
+ * `--freigeben` nicht mehr mit.
+ *
  * Lesen:     npx tsx tools/freigabe-runde.ts
  * Schreiben: npx tsx tools/freigabe-runde.ts --schreiben
+ * Freigeben: npx tsx tools/freigabe-runde.ts --schreiben --freigeben
  *
  * Ohne `--schreiben` wird das Sheet nicht angefasst.
  */
@@ -22,6 +29,8 @@ import { GoogleAuth } from "google-auth-library";
 import { readFileSync } from "node:fs";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "../src/trigger/anrede";
 import { adresseIstUnbrauchbar } from "../src/trigger/nacht-recherche";
+import { regelBefunde, gesperrteZeilen } from "./freigabe-pruefung";
+import type { Befund } from "./freigabe-pruefung";
 
 const QUEUE_TAB = "Outreach Queue";
 const SCHREIBEN = process.argv.includes("--schreiben");
@@ -50,11 +59,6 @@ type Zeile = {
   nische: string;
 };
 
-type Befund =
-  | { art: "verworfen"; grund: string }
-  | { art: "repariert"; was: string }
-  | { art: "prüfen"; hinweis: string };
-
 async function main(): Promise<void> {
   ladeEnv();
   const auth = new GoogleAuth({
@@ -69,6 +73,17 @@ async function main(): Promise<void> {
     range: `${QUEUE_TAB}!A:U`,
   });
   const rohzeilen = antwort.data.values ?? [];
+
+  // Betreffe, die schon draussen sind. Gegen die prüft betreffIstBrauchbar —
+  // ein Betreff, der bereits verschickt wurde, darf nicht ein zweites Mal raus.
+  const verbrauchteBetreffe: string[] = [];
+  for (let i = 1; i < rohzeilen.length; i++) {
+    const r = rohzeilen[i] ?? [];
+    const status = (r[5] ?? "").trim();
+    if ((status === "GESENDET" || status.startsWith("NACHGEFASST")) && r[8]) {
+      verbrauchteBetreffe.push(String(r[8]));
+    }
+  }
 
   const zeilen: Zeile[] = [];
   for (let i = 1; i < rohzeilen.length; i++) {
@@ -129,6 +144,13 @@ async function main(): Promise<void> {
       liste.push({ art: "prüfen", hinweis: `Betreff bricht die Kleinschreibung: "${z.betreff}"` });
     }
 
+    // ── Die vier Regeln, die nacht-recherche nur ins Log schreibt ───────────
+    // Geprüft wird die reparierte Fassung, nicht das Original — sonst meldet
+    // die Runde einen Mangel, den sie zwei Zeilen vorher selbst behoben hat.
+    for (const hinweis of regelBefunde({ ...z, entwurf: neu }, verbrauchteBetreffe)) {
+      liste.push({ art: "prüfen", hinweis });
+    }
+
     if (liste.length) befunde.set(z.nummer, liste);
   }
 
@@ -153,14 +175,23 @@ async function main(): Promise<void> {
   zeigen("REPARIERT", repariert);
   zeigen("BRAUCHT EIN URTEIL", zuPruefen);
 
-  // Freigabe: alles, was diese Runde nicht verworfen hat, auf DRAFT.
-  const verworfeneNummern = new Set(verworfen.map(([nr]) => nr));
-  const freizugeben = zeilen.filter((z) => !verworfeneNummern.has(z.nummer));
+  // Freigabe: nur, was weder verworfen wurde noch einen offenen Befund hat.
+  //
+  // Bis zum 08.09.2026 stand hier "alles, was nicht verworfen wurde" — und weil
+  // die Runde die Regelbrüche gar nicht sah, hiess das: alles. Ein Entwurf mit
+  // wörtlich abgeschriebenem Branchen-Hook geht an dutzende Betriebe derselben
+  // Branche mit demselben Satz. Was einen Befund hat, bleibt auf PRUEFEN, bis
+  // ein Mensch hingesehen oder neu-generieren.ts die Copy ersetzt hat.
+  const gesperrt = gesperrteZeilen(befunde);
+  const freizugeben = zeilen.filter((z) => !gesperrt.has(z.nummer));
   if (FREIGEBEN) {
     for (const z of freizugeben) {
       updates.push({ range: `${QUEUE_TAB}!F${z.nummer}`, values: [["DRAFT"]] });
     }
-    console.log(`== FREIGABE ==\n  ${freizugeben.length} Zeilen PRUEFEN → DRAFT\n`);
+    console.log(
+      `== FREIGABE ==\n  ${freizugeben.length} Zeilen PRUEFEN → DRAFT\n` +
+        `  ${gesperrt.size} bleiben auf PRUEFEN (verworfen oder mit Befund)\n`
+    );
   }
 
   if (!SCHREIBEN) {
