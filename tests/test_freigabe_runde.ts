@@ -8,7 +8,7 @@
 // denen 23 einen hatten. Ein `--freigeben` hätte 11 Mails mit wörtlich
 // abgeschriebenem Branchen-Hook an Tierarztpraxen derselben Stadt geschickt.
 
-import { regelBefunde, hookZurNische, gesperrteZeilen } from "../tools/freigabe-pruefung";
+import { regelBefunde, hookZurNische, gesperrteZeilen, zeilenAusArgument } from "../tools/freigabe-pruefung";
 import type { Befund } from "../tools/freigabe-pruefung";
 
 let bestanden = 0;
@@ -104,6 +104,50 @@ check(
   unbekannt.some((b) => b.includes("ungeprüft")),
   "unbekannte Nische wird als ungeprüft gemeldet statt still übersprungen"
 );
+
+// ── Betreffzeile im Mailtext (Befund 09.09.2026) ───────────────────────────
+// Das Modell schreibt gelegentlich "BETREFF: ..." als erste Zeile in den TEXT,
+// zusätzlich zum Betreff in Spalte I. Der Empfänger liest das als Kopfzeile
+// eines Formbriefs. Keine Regel hat das gesehen: am 09.09. trugen 7 von 41
+// freigabereifen Entwürfen diese Zeile, und --freigeben hätte sie mitgenommen.
+const mitBetreffzeile = regelBefunde(
+  zeile({ entwurf: "BETREFF: kurze frage\n\nHey, bei der Kleintierpraxis Berg ist abends niemand am Apparat. Probiert es aus: https://demo.nio-automation.de/a/abc123" }),
+  []
+);
+check(
+  mitBetreffzeile.some((b) => b.includes("Betreffzeile")),
+  "Betreffzeile im Mailtext wird gemeldet"
+);
+
+const kleingeschrieben = regelBefunde(
+  zeile({ entwurf: "betreff: kurze frage\n\nHey, bei der Kleintierpraxis Berg ist abends niemand am Apparat. https://demo.nio-automation.de/a/abc123" }),
+  []
+);
+check(
+  kleingeschrieben.some((b) => b.includes("Betreffzeile")),
+  "auch klein geschrieben, mit Doppelpunkt"
+);
+
+// Gegenrichtung: das Wort mitten im Fliesstext ist keine Kopfzeile.
+const wortImText = regelBefunde(
+  zeile({ entwurf: "Hey, bei der Kleintierpraxis Berg ist abends niemand am Apparat. Schreibt einfach einen Betreff: egal welchen. https://demo.nio-automation.de/a/abc123" }),
+  []
+);
+check(
+  !wortImText.some((b) => b.includes("Betreffzeile")),
+  "das Wort im Fliesstext loest keinen Befund aus"
+);
+
+// ── Fit-Nein eines Menschen (Befund 09.09.2026) ────────────────────────────
+// Die Runde trennt Mechanik von Urteil, aber das Urteil hatte bis heute keinen
+// Ort: --freigeben nimmt ALLE Zeilen ohne Befund mit. Wer beim Lesen fünf
+// Entwürfe als unpassend erkennt, musste das Sheet von Hand anfassen. Damit war
+// die Runde nur zur Hälfte durchführbar.
+check(zeilenAusArgument("1526,1555,1559").size === 3, "drei Nummern werden gelesen");
+check(zeilenAusArgument("1526, 1555 , 1559").has(1555), "Leerzeichen stoeren nicht");
+check(zeilenAusArgument("").size === 0, "leeres Argument ergibt keine Zeile");
+check(zeilenAusArgument("abc,12x,7").size === 1, "Unfug wird verworfen, gueltige Nummer bleibt");
+check(!zeilenAusArgument("0,-3").has(0), "Zeile 0 ist keine Sheet-Zeile");
 
 // ── die Freigabe-Sperre ────────────────────────────────────────────────────
 // Der eigentliche Fix: was einen Befund hat, darf --freigeben nicht mitnehmen.

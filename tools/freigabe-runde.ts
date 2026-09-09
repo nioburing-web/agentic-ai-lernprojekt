@@ -17,11 +17,18 @@
  * deshalb null Befunde bei 23 defekten Entwürfen. Was einen Befund hat, nimmt
  * `--freigeben` nicht mehr mit.
  *
+ * Seit dem 09.09.2026 hat auch das Fit-NEIN einen Ort. Vorher nahm `--freigeben`
+ * jede Zeile ohne mechanischen Befund mit — auch die, die beim Lesen durchgefallen
+ * war. Wer fünf unpassende Entwürfe erkannte, musste das Sheet von Hand anfassen,
+ * also ausserhalb jeder Prüfung. Damit war die Runde nur zur Hälfte durchführbar.
+ *
  * Lesen:     npx tsx tools/freigabe-runde.ts
  * Schreiben: npx tsx tools/freigabe-runde.ts --schreiben
+ * Verwerfen: npx tsx tools/freigabe-runde.ts --schreiben --verwerfen=1526,1555 --grund="..."
  * Freigeben: npx tsx tools/freigabe-runde.ts --schreiben --freigeben
  *
- * Ohne `--schreiben` wird das Sheet nicht angefasst.
+ * Ohne `--schreiben` wird das Sheet nicht angefasst. Verwerfen und Freigeben in
+ * zwei Läufen: erst das Nein festschreiben, dann sehen was übrig ist, dann raus.
  */
 
 import { sheets as googleSheets } from "@googleapis/sheets";
@@ -29,7 +36,7 @@ import { GoogleAuth } from "google-auth-library";
 import { readFileSync } from "node:fs";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "../src/trigger/anrede";
 import { adresseIstUnbrauchbar } from "../src/trigger/nacht-recherche";
-import { regelBefunde, gesperrteZeilen } from "./freigabe-pruefung";
+import { regelBefunde, gesperrteZeilen, zeilenAusArgument } from "./freigabe-pruefung";
 import type { Befund } from "./freigabe-pruefung";
 
 const QUEUE_TAB = "Outreach Queue";
@@ -38,6 +45,17 @@ const SCHREIBEN = process.argv.includes("--schreiben");
 // steht, ist durchgesehen und geht in den Versand. Bewusst ein eigener Schalter
 // — er ist der einzige Schritt, der Mails auf den Weg bringt.
 const FREIGEBEN = process.argv.includes("--freigeben");
+
+// Das Fit-Nein eines Menschen. Bis zum 09.09.2026 hatte es keinen Ort: --freigeben
+// nahm jede Zeile ohne mechanischen Befund mit, auch die, die beim Lesen durchgefallen
+// war. Wer das sah, musste das Sheet von Hand anfassen — also ausserhalb jeder Prüfung.
+//   --verwerfen=1526,1555  --grund="englischer Maps-Name im Satz"
+const FIT_NEIN = zeilenAusArgument(
+  (process.argv.find((a) => a.startsWith("--verwerfen=")) ?? "").split("=").slice(1).join("=")
+);
+const FIT_GRUND =
+  (process.argv.find((a) => a.startsWith("--grund=")) ?? "").split("=").slice(1).join("=") ||
+  "beim Lesen als unpassend beurteilt";
 
 // Läuft außerhalb von Trigger.dev, also kommt die Umgebung aus der .env des Repos.
 function ladeEnv(): void {
@@ -116,6 +134,18 @@ async function main(): Promise<void> {
       kontakt = kontakt.replace(/^(%20)+/, "");
       liste.push({ art: "repariert", was: `Adresse ${z.kontakt} → ${kontakt}` });
       updates.push({ range: `${QUEUE_TAB}!D${z.nummer}`, values: [[kontakt]] });
+    }
+
+    // ── Fit-Nein eines Menschen ────────────────────────────────────────────
+    // Zuerst, damit keine Reparatur an einer Zeile arbeitet, die ohnehin raus
+    // ist. Geschrieben wird über denselben Weg wie die Adress-Verwerfung: Status
+    // in F, Grund in J. Ein zweiter Weg würde driften.
+    if (FIT_NEIN.has(z.nummer)) {
+      liste.push({ art: "verworfen", grund: `Fit-Urteil: ${FIT_GRUND}` });
+      updates.push({ range: `${QUEUE_TAB}!F${z.nummer}`, values: [["VERWORFEN"]] });
+      updates.push({ range: `${QUEUE_TAB}!J${z.nummer}`, values: [[`Freigabe-Runde: Fit-Urteil — ${FIT_GRUND}`]] });
+      befunde.set(z.nummer, liste);
+      continue;
     }
 
     const adressGrund = adresseIstUnbrauchbar(kontakt);

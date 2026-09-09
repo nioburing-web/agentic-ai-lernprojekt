@@ -78,9 +78,46 @@ export function regelBefunde(
     out.push("Blickwinkel-Vorlage wörtlich übernommen");
   }
 
+  // Betreffzeile IM Text (Befund 09.09.2026): das Modell wiederholt den Betreff
+  // gelegentlich als erste Zeile des Mailtextes. Der Betreff steht aber schon in
+  // Spalte I und wird von morgen-versand separat gesetzt — im Text gelesen wirkt
+  // er wie die Kopfzeile eines Formbriefs. Keine der bestehenden Regeln sah das:
+  // an diesem Tag trugen 7 von 41 freigabereifen Entwürfen die Zeile, und
+  // --freigeben hätte sie mitgenommen. Nur die ERSTE nicht-leere Zeile zählt,
+  // sonst meldet jeder Satz mit dem Wort "Betreff:" einen Befund.
+  const ersteZeile = zeile.entwurf.split(/\r?\n/).find((z) => z.trim().length > 0) ?? "";
+  if (/^\s*betreff\s*:/i.test(ersteZeile)) {
+    out.push(`Betreffzeile steht im Mailtext: "${ersteZeile.trim().slice(0, 60)}"`);
+  }
+
   if (oeffnerIstFloskel(zeile.entwurf)) out.push("Floskel-Einstieg");
   if (!betreffIstBrauchbar(zeile.betreff, verbrauchteBetreffe)) {
     out.push(`Betreff unbrauchbar oder doppelt: "${zeile.betreff}"`);
+  }
+  return out;
+}
+
+/**
+ * Liest eine Zeilenliste wie "1526,1555,1559" aus einem Kommandozeilen-Argument.
+ *
+ * Warum es das gibt (09.09.2026): die Runde trennt Mechanik von Urteil, aber das
+ * Urteil hatte keinen Ort. `--freigeben` nimmt jede Zeile ohne Befund mit, also
+ * auch die, die ein Mensch beim Lesen als unpassend erkannt hat — englischer
+ * Maps-Name mitten im Satz, Adresse einer fremden Domain, eine erfundene Aussage
+ * über die Website des Empfängers. Wer das sah, musste bisher das Sheet von Hand
+ * anfassen. Damit war die Runde nur zur Hälfte durchführbar, und der Rest lag
+ * ausserhalb jeder Prüfung.
+ *
+ * Bewusst streng: was keine positive ganze Zahl ist, fällt raus. Ein Vertipper
+ * soll keine fremde Zeile verwerfen.
+ */
+export function zeilenAusArgument(arg: string): Set<number> {
+  const out = new Set<number>();
+  for (const teil of (arg ?? "").split(",")) {
+    const roh = teil.trim();
+    if (!/^\d+$/.test(roh)) continue;
+    const n = Number.parseInt(roh, 10);
+    if (Number.isInteger(n) && n > 0) out.add(n);
   }
   return out;
 }
