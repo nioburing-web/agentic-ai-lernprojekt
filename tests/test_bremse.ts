@@ -7,7 +7,9 @@
 // legte für 2-3 EUR Maps- und LLM-Kosten 30 weitere dazu. Der teuerste Schritt
 // der Pipeline produzierte Nachschub für einen Stapel, der liegen blieb.
 
-import { zaehleOffenePruefungen, PRUEFEN_OBERGRENZE } from "../src/trigger/nacht-recherche";
+import {
+  zaehleOffenePruefungen, PRUEFEN_OBERGRENZE, PRUEFEN_TAGE_PUFFER, TAGES_DECKEL,
+} from "../src/trigger/nacht-recherche";
 
 let bestanden = 0;
 let fehlgeschlagen = 0;
@@ -31,7 +33,16 @@ function stubMitStatus(status: string[]): any {
 }
 
 async function main(): Promise<void> {
-  check(PRUEFEN_OBERGRENZE === 60, "Grenze steht auf zwei vollen Versandtagen (2 x 30)");
+  // Die Grenze wird gerechnet, nicht gesetzt. Vorher stand hier eine 60 und die
+  // Herleitung nur im Kommentar daneben — dann darf die Zahl wandern, ohne dass
+  // ein Test es merkt.
+  check(
+    PRUEFEN_OBERGRENZE === TAGES_DECKEL * PRUEFEN_TAGE_PUFFER,
+    `Grenze ist Tagesdeckel x Puffertage (${TAGES_DECKEL} x ${PRUEFEN_TAGE_PUFFER} = ${PRUEFEN_OBERGRENZE})`,
+  );
+  // Nios Entscheidung vom 10.09.2026: der Fit-Read wird woechentlich, nicht
+  // taeglich. Bei 2 Tagen Puffer war er zwangslaeufig eine Tagesaufgabe.
+  check(PRUEFEN_TAGE_PUFFER >= 5, `Puffer traegt eine ganze Arbeitswoche (${PRUEFEN_TAGE_PUFFER} Tage)`);
 
   const leer = await zaehleOffenePruefungen(stubMitStatus([]), "x");
   check(leer === 0, "leere Queue → 0 offene Prüfungen");
@@ -51,9 +62,18 @@ async function main(): Promise<void> {
   check(mitLeerzeichen === 2, "Leerzeichen um den Status werden getrimmt");
 
   // Die Entscheidung selbst: die Grenze ist ein "größer als", kein "größer gleich".
-  // Genau 60 offene Zeilen sind noch zwei volle Versandtage, also kein Stau.
-  check(!(60 > PRUEFEN_OBERGRENZE), "genau 60 offene Zeilen bremsen NICHT");
-  check(61 > PRUEFEN_OBERGRENZE, "61 offene Zeilen bremsen");
+  // Genau die Grenze sind noch volle Versandtage, also kein Stau.
+  check(
+    !(PRUEFEN_OBERGRENZE > PRUEFEN_OBERGRENZE),
+    `genau ${PRUEFEN_OBERGRENZE} offene Zeilen bremsen NICHT`,
+  );
+  check(
+    PRUEFEN_OBERGRENZE + 1 > PRUEFEN_OBERGRENZE,
+    `${PRUEFEN_OBERGRENZE + 1} offene Zeilen bremsen`,
+  );
+  // Der alte Stand von 60 darf jetzt NICHT mehr bremsen — sonst ist die
+  // Entscheidung vom 10.09. zwar dokumentiert, aber nicht wirksam.
+  check(!(60 > PRUEFEN_OBERGRENZE), "60 offene Zeilen bremsen nicht mehr (alter Stand)");
 
   console.log(`\n${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen`);
   process.exit(fehlgeschlagen > 0 ? 1 : 0);

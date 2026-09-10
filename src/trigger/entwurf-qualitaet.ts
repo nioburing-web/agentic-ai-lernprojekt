@@ -173,6 +173,60 @@ export function nameIstBrauchbar(name: string): boolean {
   return zeichen.length >= 3;
 }
 
+/**
+ * Steht die Betreffzeile als Kopfzeile im Mailtext?
+ *
+ * Lag bis zum 10.09.2026 nur in `tools/freigabe-pruefung.ts`, also allein im
+ * Prüfer. Hier, weil beide Seiten dieselbe Regel brauchen und eine Regel an
+ * zwei Stellen auseinanderläuft — am 08.09. reichte ein fehlendes `i`-Flag in
+ * einem Nachbau, damit ein Entwurf mit Floskel-Einstieg als sauber durchging.
+ *
+ * Nur die ERSTE nicht-leere Zeile zählt. Sonst meldet jeder Satz, in dem das
+ * Wort "Betreff:" vorkommt, einen Befund.
+ */
+export function betreffzeileImText(inhalt: string): boolean {
+  const ersteZeile = (inhalt ?? "").split(/\r?\n/).find((z) => z.trim().length > 0) ?? "";
+  return /^\s*betreff\s*:/i.test(ersteZeile);
+}
+
+/**
+ * Die Kopfzeile weg, der Rest unverändert.
+ *
+ * Erfindet nichts: der Betreff steht bereits in Spalte I, im Mailtext ist er
+ * eine Dopplung. Deshalb darf das mechanisch passieren, so wie die Anrede in
+ * `vereinheitlicheAnrede` — und anders als der Betreff selbst, der nur gemeldet
+ * und nie stillschweigend umgeschrieben wird.
+ */
+export function ohneBetreffKopfzeile(inhalt: string): string {
+  if (!betreffzeileImText(inhalt)) return inhalt;
+  return (inhalt ?? "").replace(/^\s*betreff\s*:.*(?:\r?\n)+/i, "").trim();
+}
+
+/**
+ * Bricht der Betreff die Kleinschreibung, die der Prompt verlangt?
+ *
+ * Der Prompt sagt seit Wochen "Max 6 Wörter, klein geschrieben wie von einem
+ * Menschen getippt". Geprüft wurde das bis zum 10.09.2026 nur in
+ * `tools/freigabe-runde.ts`, also erst im Prüfer — der Erzeuger konnte eine
+ * Regel gar nicht erfüllen, die erst nach ihm angelegt wurde. An diesem Tag
+ * hielt sie 8 von 53 offenen Zeilen auf.
+ *
+ * Sechster Fall derselben Bauart nach Betreff (17.07.), Firmenname (09.08.),
+ * Hook (13.08.), Einstieg (27.08.) und Vorlage (08.09.): die Regel stand im
+ * Prompt, aber nichts hat das Ergebnis nachgemessen.
+ *
+ * Bewusst NICHT automatisch kleingeschrieben: im Deutschen trägt die
+ * Großschreibung Bedeutung. `toLowerCase()` macht aus "Frage zur
+ * Unternehmensnachfolge" ein "frage zur unternehmensnachfolge" und aus dem
+ * höflichen "Sie" ein "sie". Also erkennen und einmal gezielt nachfassen, so
+ * wie bei den fünf Regeln davor.
+ */
+export function betreffBrichtKleinschreibung(betreff: string): boolean {
+  const b = (betreff ?? "").trim();
+  if (b.length === 0) return false;
+  return b !== b.toLowerCase();
+}
+
 // Eröffnungen, die der Prompt ausdrücklich verbietet, weil sie den Serienbrief
 // verraten. Am 27.08.2026 standen sie trotzdem in 2 von 60 Entwürfen.
 const VERBOTENE_OEFFNER = [

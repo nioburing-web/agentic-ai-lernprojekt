@@ -35,6 +35,9 @@ import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import { readFileSync } from "node:fs";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "../src/trigger/anrede";
+import {
+  betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
+} from "../src/trigger/entwurf-qualitaet";
 import { adresseIstUnbrauchbar } from "../src/trigger/nacht-recherche";
 import { regelBefunde, gesperrteZeilen, zeilenAusArgument } from "./freigabe-pruefung";
 import type { Befund } from "./freigabe-pruefung";
@@ -167,17 +170,36 @@ async function main(): Promise<void> {
       liste.push({ art: "prüfen", hinweis: "Anrede BLEIBT gemischt — Regel greift nicht" });
     }
 
+    // ── Betreffzeile im Mailtext: deterministisch entfernen ────────────────
+    // Neu am 10.09.2026. Die Zeile ist eine Dopplung — der Betreff steht in
+    // Spalte I —, also erfindet ihr Entfernen nichts und gehört zur Mechanik,
+    // nicht vor Nios Augen. An diesem Tag hingen 9 der 53 offenen Zeilen allein
+    // daran. Die Ursache ist im Erzeuger gefixt (`zerlegeAntwort`); diese
+    // Reparatur holt den Bestand nach, der schon im Sheet liegt.
+    let text = neu;
+    if (betreffzeileImText(text)) {
+      const bereinigt = ohneBetreffKopfzeile(text);
+      if (bereinigt.trim().length > 0) {
+        text = bereinigt;
+        liste.push({ art: "repariert", was: "Betreffzeile aus dem Mailtext entfernt" });
+        updates.push({ range: `${QUEUE_TAB}!E${z.nummer}`, values: [[text]] });
+      }
+    }
+
     // ── Betreff: nur melden, nie stillschweigend ändern ────────────────────
     // Ein Betreff ist die einzige Zeile, die der Empfänger garantiert liest.
-    // Ihn automatisch umzuschreiben hieße raten, was gemeint war.
-    if (z.betreff && z.betreff !== z.betreff.toLowerCase()) {
+    // Ihn automatisch umzuschreiben hieße raten, was gemeint war — im Deutschen
+    // trägt die Großschreibung Bedeutung. Die Regel liegt seit dem 10.09.2026 in
+    // `entwurf-qualitaet.ts`, damit der Erzeuger sie kennt und erfüllen kann;
+    // hier wird sie importiert, nicht ein zweites Mal geschrieben.
+    if (betreffBrichtKleinschreibung(z.betreff)) {
       liste.push({ art: "prüfen", hinweis: `Betreff bricht die Kleinschreibung: "${z.betreff}"` });
     }
 
     // ── Die vier Regeln, die nacht-recherche nur ins Log schreibt ───────────
     // Geprüft wird die reparierte Fassung, nicht das Original — sonst meldet
     // die Runde einen Mangel, den sie zwei Zeilen vorher selbst behoben hat.
-    for (const hinweis of regelBefunde({ ...z, entwurf: neu }, verbrauchteBetreffe)) {
+    for (const hinweis of regelBefunde({ ...z, entwurf: text }, verbrauchteBetreffe)) {
       liste.push({ art: "prüfen", hinweis });
     }
 

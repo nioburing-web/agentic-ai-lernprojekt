@@ -12,7 +12,7 @@ import {
   vorlageIstAbgeschrieben,
   vorlagenFuer,
 } from "../src/trigger/nacht-recherche";
-import { oeffnerIstFloskel } from "../src/trigger/entwurf-qualitaet";
+import { oeffnerIstFloskel, betreffzeileImText } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
 
 export type Befund =
@@ -83,10 +83,15 @@ export function regelBefunde(
   // Spalte I und wird von morgen-versand separat gesetzt — im Text gelesen wirkt
   // er wie die Kopfzeile eines Formbriefs. Keine der bestehenden Regeln sah das:
   // an diesem Tag trugen 7 von 41 freigabereifen Entwürfen die Zeile, und
-  // --freigeben hätte sie mitgenommen. Nur die ERSTE nicht-leere Zeile zählt,
-  // sonst meldet jeder Satz mit dem Wort "Betreff:" einen Befund.
-  const ersteZeile = zeile.entwurf.split(/\r?\n/).find((z) => z.trim().length > 0) ?? "";
-  if (/^\s*betreff\s*:/i.test(ersteZeile)) {
+  // --freigeben hätte sie mitgenommen.
+  //
+  // Seit dem 10.09.2026 liegt die Regel in `entwurf-qualitaet.ts` und wird von
+  // dort importiert, nicht mehr hier nachgebaut: der Erzeuger braucht dieselbe
+  // Prüfung, und zwei Fassungen laufen auseinander. Die Ursache saß ohnehin
+  // eine Stufe früher — `zerlegeAntwort` nahm ohne `EMAIL:`-Marker die ganze
+  // Rohausgabe und schob die Betreffzeile selbst in den Mailtext.
+  if (betreffzeileImText(zeile.entwurf)) {
+    const ersteZeile = zeile.entwurf.split(/\r?\n/).find((z) => z.trim().length > 0) ?? "";
     out.push(`Betreffzeile steht im Mailtext: "${ersteZeile.trim().slice(0, 60)}"`);
   }
 

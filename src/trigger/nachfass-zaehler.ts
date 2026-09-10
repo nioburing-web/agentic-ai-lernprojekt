@@ -18,8 +18,15 @@
  * es eins — und dann ist es schwerer zu aendern als jetzt.
  */
 
-/** Die vier Pruefungen, die einen zweiten Aufruf ausloesen koennen. */
-export type Nachfassgrund = "betreff" | "name" | "hook" | "vorlage" | "einstieg";
+/**
+ * Die Pruefungen, die einen zweiten Aufruf ausloesen koennen.
+ *
+ * "kleinschreibung" kam am 10.09.2026 dazu: der Prompt verlangt einen klein
+ * geschriebenen Betreff, geprueft wurde das bis dahin nur in der Freigabe-Runde.
+ * 8 von 53 offenen Zeilen hingen an dieser Regel, die der Erzeuger nicht kannte.
+ */
+export type Nachfassgrund =
+  | "betreff" | "kleinschreibung" | "name" | "hook" | "vorlage" | "einstieg";
 
 export type Nachfasszaehler = {
   entwuerfe: number;

@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { schedules, wait } from "@trigger.dev/sdk";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
-import { saubererBetriebsname, oeffnerIstFloskel, nameIstBrauchbar } from "./entwurf-qualitaet";
+import {
+  saubererBetriebsname, oeffnerIstFloskel, nameIstBrauchbar,
+  betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
+} from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
 import {
   neuerNachfasszaehler, zaehleEntwurf, zaehleNachfass, nachfassBericht,
@@ -115,10 +118,42 @@ async function sicherQueueTab(sheets: ReturnType<typeof googleSheets>, sheetId: 
 }
 
 /**
- * Obergrenze fuer unbearbeitete Entwuerfe. Zwei volle Versandtage (30/Tag) sind
- * ein gesunder Vorrat; alles darueber ist Stau, nicht Puffer.
+ * Wieviele Entwuerfe eine Nacht hoechstens erzeugt. `morgen-versand` verschickt
+ * dieselbe Zahl an Erstmails pro Tag — Erzeugung und Versand sind bewusst gleich
+ * getaktet.
+ *
+ * Stand bis zum 10.09.2026 als lokale Konstante im Task und war damit fuer die
+ * Bremse darunter unsichtbar; deren "zwei Versandtage" lebten nur im Kommentar.
  */
-export const PRUEFEN_OBERGRENZE = 60;
+export const TAGES_DECKEL = 30;
+
+/**
+ * Wieviele Versandtage an ungelesenen Entwuerfen sich stapeln duerfen.
+ *
+ * Stand bis zum 10.09.2026 auf 2 — und genau das machte den Fit-Read zur
+ * Tagesaufgabe: bei 30 erzeugten und 30 verschickten Mails pro Tag laeuft der
+ * Versand am uebernaechsten Morgen leer, wenn niemand liest. Nicht das Lesen war
+ * zu viel, der Puffer war zu klein.
+ *
+ * Auf Nios Entscheidung vom 10.09.2026 auf 6 Tage: das Fit-Gate bleibt scharf,
+ * aber es wird einmal pro Woche bedient statt jeden Morgen. Sechs statt fuenf,
+ * damit eine verschobene Runde nicht sofort den Versand anhaelt.
+ *
+ * Was das kostet: nichts an Maps- oder LLM-Ausgaben, die fallen pro Lead an,
+ * egal wann gelesen wird. Verschwendet ist nur der Anteil, den Nio beim Lesen
+ * verwirft — am 09.09. waren das 13 von 57. Der echte Preis ist Frische: ein
+ * Lead kann jetzt bis zu sechs Tage zwischen Recherche und Anschreiben liegen.
+ */
+export const PRUEFEN_TAGE_PUFFER = 6;
+
+/**
+ * Obergrenze fuer unbearbeitete Entwuerfe. Alles darueber ist Stau, nicht Puffer.
+ *
+ * Aus den beiden Zahlen darueber gerechnet statt hart gesetzt: die Bremse soll
+ * mitwandern, wenn sich der Tagesdeckel aendert. Vorher stand hier eine 60 und
+ * die Herleitung nur im Kommentar — dann driften Zahl und Begruendung.
+ */
+export const PRUEFEN_OBERGRENZE = TAGES_DECKEL * PRUEFEN_TAGE_PUFFER;
 
 /**
  * Zaehlt die Zeilen, die auf eine menschliche Freigabe warten.
@@ -898,6 +933,39 @@ export function betreffIstBrauchbar(betreff: string, verbrauchte: string[] = [])
   return true;
 }
 
+/**
+ * Zerlegt die Rohantwort des Modells in Betreff und Mailtext.
+ *
+ * Aus `erzeuge()` herausgezogen (10.09.2026), damit ein Test sie ohne LLM-Aufruf
+ * fahren kann. Das Format ist zwei Marker in einer Antwort:
+ *
+ *   BETREFF: <betreff>
+ *   EMAIL: <mailtext>
+ *
+ * Der `EMAIL:`-Marker fehlt in der Praxis regelmäßig — das Modell schreibt den
+ * Betreff und danach direkt die Mail. Der Fallback nahm dafür die ganze
+ * Rohausgabe, also inklusive der `BETREFF:`-Zeile, und die stand danach als
+ * Kopfzeile im Mailtext. Gemessen am 10.09.2026 an den offenen Zeilen der Queue:
+ * 9 von 53 trugen sie, und die Freigabe-Runde hielt jede davon auf.
+ *
+ * Das war nie ein Qualitätsproblem des Modells, sondern unser Parser: Spalte I
+ * trug den Betreff korrekt, Spalte E trug ihn ein zweites Mal als Kopfzeile.
+ * Deshalb wird die Zeile hier abgeschnitten statt einer neuen Regel überlassen —
+ * sie zu entfernen erfindet nichts, der Betreff steht bereits in Spalte I.
+ */
+export function zerlegeAntwort(raw: string): { betreff: string; inhalt: string } {
+  const text = (raw ?? "").trim();
+  const betreff = text.match(/BETREFF:\s*(.+)/)?.[1]?.trim() ?? "kurze frage";
+  const nachMarker = text.match(/EMAIL:\s*([\s\S]+)/)?.[1]?.trim();
+  if (nachMarker) return { betreff, inhalt: nachMarker };
+  // Kein EMAIL:-Marker. Bis zum 10.09.2026 stand hier `?? raw`, also die ganze
+  // Rohausgabe. Jetzt faellt nur die Kopfzeile weg — und auch das nur, wenn
+  // danach noch Text uebrig bleibt. Ein leerer Entwurf waere schlimmer als ein
+  // unsauberer: er reisst die Demo-Link-Pruefung und der Lead ist still weg.
+  const ohneKopf = ohneBetreffKopfzeile(text);
+  return { betreff, inhalt: ohneKopf.trim().length > 0 ? ohneKopf : text };
+}
+
 // Jeder Mail-Entwurf ist ein eigener API-Call ohne Wissen über die anderen 29 des
 // Laufs. Das Modell KANN Wiederholung also nicht selbst vermeiden — "formuliere
 // frisch" im Prompt reicht prinzipiell nicht. Deshalb bekommt es die zuletzt
@@ -1034,10 +1102,7 @@ EMAIL: <email-text>`,
         : basis,
     });
     const raw = completion.choices[0]?.message?.content?.trim() ?? "";
-    return {
-      betreff: raw.match(/BETREFF:\s*(.+)/)?.[1]?.trim() ?? "kurze frage",
-      inhalt: raw.match(/EMAIL:\s*([\s\S]+)/)?.[1]?.trim() ?? raw,
-    };
+    return zerlegeAntwort(raw);
   }
 
   // Eine Prompt-Regel ist keine Garantie. Der Ausfall vom 17.07. entstand genau
@@ -1054,6 +1119,41 @@ EMAIL: <email-text>`,
     zaehleNachfass(nachfassen, "betreff", betreffGeloest);
     if (!betreffGeloest) {
       console.log(`Betreff auch im 2. Versuch unbrauchbar ("${ergebnis.betreff}") für ${firma}`);
+      // Bis zum 10.09.2026 endete dieser Zweig hier, mit einer Zeile im Log und
+      // sonst nichts. Der Entwurf ging als versandfertig durch, und erst die
+      // Freigabe-Runde hielt ihn auf — an diesem Tag 5 von 53 Zeilen. Genau der
+      // Zustand, den der Mangel-Mechanismus am 06.09. beenden sollte: der
+      // Erzeuger WUSSTE, dass die Regel zweimal riss, und hat es weggeworfen.
+      maengel.push("betreff unbrauchbar");
+    }
+  }
+
+  // Die Kleinschreibung des Betreffs, sechster Fall derselben Bauart. Der Prompt
+  // verlangt sie ("klein geschrieben wie von einem Menschen getippt"), geprüft
+  // wurde sie bis zum 10.09.2026 nur in tools/freigabe-runde.ts — also erst,
+  // nachdem der Entwurf längst geschrieben war. 8 von 53 offenen Zeilen hingen
+  // an einer Regel, die der Erzeuger gar nicht kannte.
+  //
+  // Nicht mechanisch kleingeschrieben, siehe betreffBrichtKleinschreibung():
+  // im Deutschen trägt die Großschreibung Bedeutung. Also nachfassen, und nur
+  // übernehmen, wenn der zweite Versuch die Regel wirklich hält.
+  if (betreffBrichtKleinschreibung(ergebnis.betreff)) {
+    console.log(`Betreff großgeschrieben ("${ergebnis.betreff}") – Neuversuch für ${firma}`);
+    const nachgefasst = await erzeuge(
+      `Der Betreff "${ergebnis.betreff}" ist groß geschrieben. Er soll aussehen, als hätte ihn ein Mensch schnell getippt: durchgehend klein, auch die Substantive. Gib dieselbe Mail unverändert erneut aus, nur mit klein geschriebenem Betreff nach diesem Blickwinkel: ${betreffAngle.anweisung} Wieder im Format BETREFF: / EMAIL:.`
+    );
+    const kleinGeloest =
+      !betreffBrichtKleinschreibung(nachgefasst.betreff) &&
+      betreffIstBrauchbar(nachgefasst.betreff, verbrauchteBetreffe);
+    zaehleNachfass(nachfassen, "kleinschreibung", kleinGeloest);
+    if (kleinGeloest) {
+      // Nur der Betreff wandert mit. Der Mailtext des ersten Anlaufs hat die
+      // Prüfungen darunter noch vor sich und soll nicht gegen eine ungeprüfte
+      // zweite Fassung getauscht werden.
+      ergebnis = { betreff: nachgefasst.betreff, inhalt: ergebnis.inhalt };
+    } else {
+      console.log(`Betreff auch im 2. Versuch großgeschrieben ("${ergebnis.betreff}") für ${firma}`);
+      maengel.push("betreff grossgeschrieben");
     }
   }
 
@@ -1159,6 +1259,25 @@ EMAIL: <email-text>`,
     maengel.push("anrede gemischt");
   }
 
+  // Sicherheitsnetz hinter dem Parser-Fix vom 10.09.2026, gleiche Bauart wie die
+  // Anrede: mechanisch umformen statt nachfassen. `zerlegeAntwort` schneidet die
+  // Kopfzeile schon ab, aber ein Nachfass-Ergebnis laeuft durch dieselbe Stelle
+  // und ein Modell kann die Zeile auch mitten in die Mail setzen. Der Betreff
+  // steht in Spalte I — im Mailtext ist er eine Dopplung, kein Inhalt.
+  if (betreffzeileImText(ergebnis.inhalt)) {
+    const bereinigt = ohneBetreffKopfzeile(ergebnis.inhalt);
+    // Nur uebernehmen, wenn danach noch eine Mail uebrig ist und der Demo-Link
+    // drinbleibt. Ohne den Link ist der Entwurf wertlos (der Klick ist das
+    // einzige Signal, das wir messen).
+    if (bereinigt.trim().length > 0 && bereinigt.includes(link)) {
+      console.log(`Betreffzeile aus dem Mailtext entfernt für ${firma}`);
+      ergebnis = { betreff: ergebnis.betreff, inhalt: bereinigt };
+    } else {
+      console.log(`Betreffzeile im Mailtext, Entfernen wuerde den Entwurf beschaedigen für ${firma}`);
+      maengel.push("betreffzeile im mailtext");
+    }
+  }
+
   return { ...ergebnis, maengel };
 }
 
@@ -1210,8 +1329,11 @@ export const nachtRecherche = schedules.task({
     // liegen bleibt. Am 26.08. lagen 60 ungelesene Entwuerfe da und der Lauf legte
     // 30 weitere dazu.
     //
-    // Der Schnitt liegt bewusst NICHT bei "irgendwas liegt da", sondern bei zwei
-    // vollen Versandtagen: darunter ist ein Vorrat gesund, darueber staut es sich.
+    // Der Schnitt liegt bewusst NICHT bei "irgendwas liegt da", sondern bei einer
+    // ganzen Arbeitswoche Versand: darunter ist ein Vorrat gesund, darueber staut
+    // es sich. Bis zum 10.09.2026 waren es zwei Tage — und damit war der Fit-Read
+    // zwangslaeufig eine Tagesaufgabe, weil der Versand sonst am uebernaechsten
+    // Morgen leer lief. Siehe PRUEFEN_TAGE_PUFFER.
     const offen = await zaehleOffenePruefungen(sheets, sheetId);
     if (offen > PRUEFEN_OBERGRENZE) {
       const grund = `${offen} Entwuerfe stehen auf PRUEFEN (Grenze ${PRUEFEN_OBERGRENZE}) — erst freigeben, dann neu recherchieren`;
@@ -1244,7 +1366,6 @@ export const nachtRecherche = schedules.task({
     // Drafts landeten nur in den falschen Spalten (siehe speichereDraft).
     const STAEDTE_PRO_NACHT = 6;   // Fenster; bricht früher ab sobald Deckel erreicht
     const BEGRIFFE_PRO_STADT = 3;  // Stichprobe aus den Begriffen der Kategorie
-    const TAGES_DECKEL = 30;
 
     // Harte Bremse gegen den Ausfall ab dem 29.07.2026: als der KFZ-Pool leer war,
     // churnte der Lauf alle Städte durch, riss die 15-Minuten-Grenze und endete als
