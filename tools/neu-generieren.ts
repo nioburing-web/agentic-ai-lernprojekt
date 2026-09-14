@@ -50,7 +50,7 @@ import {
   nameIstGenannt,
   betreffIstBrauchbar,
 } from "../src/trigger/nacht-recherche";
-import { oeffnerIstFloskel } from "../src/trigger/entwurf-qualitaet";
+import { oeffnerIstFloskel, nameFuerMail } from "../src/trigger/entwurf-qualitaet";
 import { anredeIstGemischt } from "../src/trigger/anrede";
 import { KATEGORIEN } from "../src/trigger/nischen";
 import type { Kategorie, Nische } from "../src/trigger/nischen";
@@ -123,7 +123,10 @@ async function mitTokenlimit<T>(was: string, aufgabe: () => Promise<T>): Promise
 function befunde(inhalt: string, betreff: string, z: Zeile, andere: string[]): string[] {
   const out: string[] = [];
   if (hookIstAbgeschrieben(inhalt, z.nische.hook)) out.push("Hook wörtlich");
-  if (!nameIstGenannt(inhalt, z.firma)) out.push("Firmenname fehlt");
+  // Geprüft wird gegen denselben Namen, der im Prompt steht. Gegen den rohen
+  // Maps-Titel verlangte die Prüfung dessen längstes Wort — bei
+  // "Fahrschule Tiger UG (haftungsbeschränkt)" also "haftungsbeschränkt" (14.09.2026).
+  if (!nameIstGenannt(inhalt, nameFuerMail(z.firma, z.stadt))) out.push("Firmenname fehlt");
   if (!betreffIstBrauchbar(betreff, andere)) out.push("Betreff unbrauchbar/doppelt");
   // Beide Prüfungen kommen aus derselben Quelle wie in nacht-recherche. Vorher
   // standen hier zwei Nachbauten: /Ich habe gesehen, dass|Mir ist aufgefallen/
@@ -300,7 +303,10 @@ async function main(): Promise<void> {
 
     const neu = await mitTokenlimit(`${z.nr} ${z.firma}`, () =>
       generiereEmailEntwurf({
-        firma: z.firma,
+        // Spalte B trägt den rohen Maps-Titel. nacht-recherche bereinigt ihn vor
+        // dem Prompt, hier fehlte das bis zum 14.09.2026 — jede Neufassung bekam den
+        // SEO-Titel samt Rechtsform und setzte ihn in den ersten Satz.
+        firma: nameFuerMail(z.firma, z.stadt),
         stadt: z.stadt,
         kategorie: z.kategorie,
         nische: z.nische,

@@ -110,6 +110,144 @@ export function saubererBetriebsname(titel: string, stadt = ""): string {
 }
 
 /**
+ * Rechtsformen, die in einem Maps-Titel stehen, im Satz einer Mail aber nichts
+ * zu suchen haben. Längere Formen zuerst, sonst bleibt von "GmbH & Co. KG" ein
+ * "& Co. KG" übrig.
+ *
+ * Die Grenzen sind Buchstaben und Ziffern, nicht `\b`: `\b` kennt keine Umlaute,
+ * und "haftungsbeschränkt" wäre dafür schon am "ä" zu Ende. Die kurzen
+ * Großbuchstaben-Formen (AG, KG, UG, OHG) sind bewusst ohne i-Flag — "AGATHE"
+ * und "ug" in einem Wort sind keine Rechtsform.
+ */
+//
+// Vor der Form darf kein Bindestrich stehen: "GEHANN Hausverwaltungs-GmbH" hiess
+// nach dem Schneiden "GEHANN Hausverwaltungs" — ein abgeschnittenes Wort ist
+// schlimmer als eine Rechtsform. Gefunden im Diff über 1689 echte Namen, nicht
+// von der Suite.
+const RECHTSFORMEN: RegExp[] = [
+  ["(GmbH|mbH|UG|AG)\\s*&\\s*Co\\.?\\s*KG", "giu"],
+  ["&\\s*Co\\.?\\s*KG", "giu"],
+  ["UG\\s*\\(\\s*haftungsbeschränkt\\s*\\)", "gu"],
+  ["\\(\\s*haftungsbeschränkt\\s*\\)", "giu"],
+  ["Partnerschaftsgesellschaft\\s+mbB", "giu"],
+  ["Partnerschaft\\s+mbB", "giu"],
+  ["Part(G)?\\s*mbB", "giu"],
+  ["PartG", "gu"],
+  ["gGmbH", "gu"],
+  ["GmbH", "giu"],
+  ["mbH", "giu"],
+  ["mbB", "giu"],
+  ["e\\.\\s?K(fm|fr)?\\.", "gu"],
+  ["[oO]HG", "gu"],
+  ["GbR", "giu"],
+  ["Ltd\\.?", "giu"],
+  ["KG", "gu"],
+  ["AG", "gu"],
+  ["UG", "gu"],
+].map(([kern, flags]) => new RegExp(`(?<![\\p{L}\\p{N}-])${kern}(?![\\p{L}\\p{N}])`, flags));
+
+/** Wörter, auf die ein Name nicht enden darf — sonst hängt der Satz ("Die Anwälte für"). */
+const HAENGENDE_WOERTER = new Set([
+  "in", "im", "am", "an", "bei", "für", "fuer", "von", "vom", "zum", "zur",
+  "der", "die", "das", "und", "u.", "&", "+", "/", ":",
+]);
+
+/**
+ * Darf die Stadt weg? Nur wenn danach ein Name steht, der ohne sie trägt.
+ *
+ * Zwei Fälle aus dem Diff vom 14.09.2026: "Versicherungsmakler Köln" wurde
+ * "Versicherungsmakler" (kein Name mehr, nur ein Beruf), und "Die Anwälte für
+ * München" wurde "Die Anwälte für". Ein Einzelwort bleibt nur ohne Stadt, wenn es
+ * nach Marke aussieht — mindestens zwei Großbuchstaben, wie "IMMODO" oder
+ * "PhysMed". "Epilacia Hannover" behält die Stadt; das liest sich noch, ein
+ * falscher Name nicht.
+ */
+function ohneStadtTraegt(kandidat: string): boolean {
+  const woerter = kandidat.split(/\s+/).filter(Boolean);
+  const letztes = (woerter[woerter.length - 1] ?? "").toLowerCase();
+  if (HAENGENDE_WOERTER.has(letztes)) return false;
+  if (woerter.length === 1 && !/\p{Lu}.*\p{Lu}/u.test(woerter[0] as string)) return false;
+  return true;
+}
+
+/** Wörter eines Stadtnamens, so zerlegt wie in `saubererBetriebsname`. */
+function stadtWoerterAus(stadt: string): Set<string> {
+  return new Set(stadt.toLowerCase().split(/[\s,\-]+/).filter((w) => w.length >= 3));
+}
+
+/** Besteht der Text nur aus Branche und Stadt? Kürzel wie "JK" zählen nicht als generisch. */
+function nurBrancheUndStadt(text: string, stadtWoerter: Set<string>): boolean {
+  const woerter = text.toLowerCase().split(/[\s.]+/).filter((w) => w.length >= 3);
+  if (woerter.length === 0) return false;
+  return woerter.every((w) => GENERISCHE_TITELWOERTER.has(w) || stadtWoerter.has(w));
+}
+
+function aufraeumen(text: string): string {
+  return text
+    // Klammern, die nach dem Schneiden leer sind oder nur "& Co." tragen:
+    // "Hinsch & Völckers KG (GmbH & Co.)" ergab sonst "Hinsch & Völckers ( & Co.)".
+    .replace(/\(\s*(&\s*Co\.?)?\s*\)/giu, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+([,)])/g, "$1")
+    .replace(/^[\s,&|–—-]+|[\s,&|–—-]+$/g, "")
+    .trim();
+}
+
+/**
+ * Der Name, der in den Satz einer Mail kommt — und gegen den geprüft wird, ob er
+ * dort steht. Eine Funktion für beides, damit Prompt und Prüfung nie
+ * verschiedene Namen meinen.
+ *
+ * Warum (Freigabe-Runde 14.09.2026): 21 von 53 verworfenen Entwürfen trugen den
+ * Maps-Namen im Fließtext — "ADVA GmbH Steuerberatungsgesellschaft kümmert sich",
+ * "bei der Fahrschule Tiger UG (haftungsbeschränkt)". `saubererBetriebsname`
+ * schneidet SEO-Segmente ab; was im Namenssegment selbst steht, lässt es stehen.
+ * Und die Namensprüfung verlangte notfalls das längste Wort des rohen Titels,
+ * bei der Fahrschule also "haftungsbeschränkt". Der Neuversuch lieferte genau das.
+ * Im Lauf vom 13.09. löste die Namensregel 19 von 30 Neuversuchen aus.
+ *
+ * Drei Schritte, jeder mit derselben Untergrenze: bleibt danach kein brauchbarer
+ * Name übrig oder nur Branche plus Stadt, gilt der Schritt nicht. Lieber
+ * "Fahrschule Nürnberg" als "Fahrschule".
+ *
+ * Bewusst nicht angefasst: Kommas. "Müller, Schmidt & Partner" ist ein Name.
+ */
+export function nameFuerMail(titel: string, stadt = ""): string {
+  const stadtWoerter = stadtWoerterAus(stadt);
+  const traegt = (kandidat: string) =>
+    nameIstBrauchbar(kandidat) && !nurBrancheUndStadt(kandidat, stadtWoerter);
+
+  let name = saubererBetriebsname(titel, stadt);
+
+  // 1. Rechtsform raus.
+  const ohneRechtsform = aufraeumen(RECHTSFORMEN.reduce((t, re) => t.replace(re, " "), name));
+  if (ohneRechtsform !== name && traegt(ohneRechtsform)) name = ohneRechtsform;
+
+  // 2. "in <Stadt>" am Ende raus. Groß und klein: "KOSMETIK IN MANNHEIM".
+  const inStadt = name.match(/^(.*\S)\s+in\s+(\S.*)$/iu);
+  if (inStadt) {
+    const rest = (inStadt[2] as string).toLowerCase().split(/[\s,\-]+/).filter((w) => w.length >= 3);
+    const kandidat = aufraeumen(inStadt[1] as string);
+    if (
+      rest.length > 0 && rest.every((w) => stadtWoerter.has(w)) &&
+      traegt(kandidat) && ohneStadtTraegt(kandidat)
+    ) name = kandidat;
+  }
+
+  // 3. Stadt als letztes Wort raus, auch mehrteilig ("Bad Homburg").
+  let woerter = name.split(/\s+/);
+  while (woerter.length > 1 && stadtWoerter.has((woerter[woerter.length - 1] as string).toLowerCase())) {
+    const kandidat = aufraeumen(woerter.slice(0, -1).join(" "));
+    if (!traegt(kandidat) || !ohneStadtTraegt(kandidat)) break;
+    name = kandidat;
+    woerter = name.split(/\s+/);
+  }
+
+  return name;
+}
+
+/**
  * Zieht führende Einzelwort-Segmente mit dem Segment dahinter zusammen.
  *
  * Warum das genau der Partner-Fall ist und nicht der SEO-Fall: Eine Kanzlei

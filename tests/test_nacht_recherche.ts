@@ -2,7 +2,7 @@
 // Kein Netzwerk, kein Sheet, kein LLM — nur die Rotations-Funktion.
 // Ausführen: npx tsx tests/test_nacht_recherche.ts
 
-import { waehleStaedte } from "../src/trigger/nacht-recherche";
+import { waehleStaedte, textsucheUrl } from "../src/trigger/nacht-recherche";
 
 let bestanden = 0;
 let fehlgeschlagen = 0;
@@ -50,6 +50,15 @@ check(heute !== morgen, "Folgetag → anderer Städte-Batch");
 // 6. Negativer/robuster Umgang mit großem tagImJahr (Modulo bleibt im Bereich)
 const gross = waehleStaedte(STAEDTE, 195, 5);
 check(gross.length === 5 && gross.every((s) => STAEDTE.includes(s)), "großer tagImJahr bleibt gültig");
+
+// Textsuche mit Sprache (14.09.2026): ohne `language` nimmt Google die Sprache aus
+// dem Accept-Language-Header, und den schickt ein Server-Fetch nicht. Die Queue
+// trug danach Namen wie "Driving School … GmbH" und "Dentist Dr. …" statt der
+// deutschen Maps-Titel, und die landeten im ersten Satz der Mail.
+const url = textsucheUrl("Fahrschule", "Nürnberg", "KEY");
+check(url.includes("language=de"), "Textsuche fragt deutsche Namen an");
+check(url.includes("query=" + encodeURIComponent("Fahrschule Nürnberg")), "Suchbegriff bleibt kodiert wie vorher");
+check(url.includes("key=KEY"), "Schlüssel wird mitgegeben");
 
 console.log(`\n${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen`);
 process.exit(fehlgeschlagen === 0 ? 0 : 1);

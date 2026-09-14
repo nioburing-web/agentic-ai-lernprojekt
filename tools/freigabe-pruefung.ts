@@ -12,7 +12,7 @@ import {
   vorlageIstAbgeschrieben,
   vorlagenFuer,
 } from "../src/trigger/nacht-recherche";
-import { oeffnerIstFloskel, betreffzeileImText } from "../src/trigger/entwurf-qualitaet";
+import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
 
 export type Befund =
@@ -59,11 +59,14 @@ export function strukturenZurNische(nischenName: string): string[] {
  * Entwurf durch, weil ihm gegenüber dem Original nur das i-Flag fehlte.
  */
 export function regelBefunde(
-  zeile: { name: string; entwurf: string; betreff: string; nische: string },
+  zeile: { name: string; entwurf: string; betreff: string; nische: string; stadt?: string },
   verbrauchteBetreffe: string[]
 ): string[] {
   const out: string[] = [];
-  if (!nameIstGenannt(zeile.entwurf, zeile.name)) out.push("Firmenname fehlt im Entwurf");
+  // Gegen den Namen, der im Prompt stand, nicht gegen den rohen Maps-Titel aus
+  // Spalte B. Sonst verlangt die Prüfung dessen längstes Wort, und das ist oft
+  // die Rechtsform (Freigabe-Runde 14.09.2026).
+  if (!nameIstGenannt(zeile.entwurf, nameFuerMail(zeile.name, zeile.stadt ?? ""))) out.push("Firmenname fehlt im Entwurf");
 
   const hook = hookZurNische(zeile.nische);
   if (hook === null) out.push(`Nische "${zeile.nische}" unbekannt — Hook-Regel ungeprüft`);

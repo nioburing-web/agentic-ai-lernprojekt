@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { schedules, wait } from "@trigger.dev/sdk";
 import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
 import {
-  saubererBetriebsname, oeffnerIstFloskel, nameIstBrauchbar,
+  nameFuerMail, oeffnerIstFloskel, nameIstBrauchbar,
   betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
 } from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
@@ -265,11 +265,25 @@ const BEVORZUGTE_PREFIXES = new Set([
   "termin", "termine", "praxis", "salon", "studio", "empfang", "rezeption",
 ]);
 
+/**
+ * URL der Maps-Textsuche.
+ *
+ * `language=de` seit dem 14.09.2026. Ohne den Parameter nimmt Google die Sprache
+ * aus dem Accept-Language-Header, und den schickt ein Server-Fetch nicht — laut
+ * Doku liefert die API dann "the closest match". In der Queue standen danach
+ * Namen wie "Driving School … GmbH", "Dentist Dr. …" oder "… vet", und die
+ * gingen in den ersten Satz der Mail. Nachträglich übersetzen hieße raten; an
+ * der Quelle nach dem deutschen Namen fragen heißt es nicht.
+ */
+export function textsucheUrl(branche: string, stadt: string, apiKey: string): string {
+  const query = encodeURIComponent(`${branche} ${stadt}`);
+  return `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&language=de&key=${apiKey}`;
+}
+
 async function suchePerGoogleMaps(branche: string, stadt: string) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) throw new Error("GOOGLE_MAPS_API_KEY fehlt");
-  const query = encodeURIComponent(`${branche} ${stadt}`);
-  const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${apiKey}`;
+  const url = textsucheUrl(branche, stadt, apiKey);
   const response = await fetchMitTimeout(url);
   if (!response.ok) throw new Error(`Google Maps Fehler: ${response.status}`);
   const data = await response.json() as {
@@ -1458,9 +1472,9 @@ export const nachtRecherche = schedules.task({
               // einen Titel, der kein Name ist ("lz" fuer eine Tierarztpraxis,
               // 04.09.2026). Der Prompt muss den Namen nennen, also stuende er im
               // ersten Satz. Lieber ueberspringen als falsch anschreiben.
-              const nameFuerMail = saubererBetriebsname(firma.name, zielstadt);
-              if (!nameIstBrauchbar(nameFuerMail)) {
-                console.log(`Firmenname unbrauchbar ("${firma.name}" -> "${nameFuerMail}"): ${website} – übersprungen`);
+              const mailName = nameFuerMail(firma.name, zielstadt);
+              if (!nameIstBrauchbar(mailName)) {
+                console.log(`Firmenname unbrauchbar ("${firma.name}" -> "${mailName}"): ${website} – übersprungen`);
                 continue;
               }
 
@@ -1487,7 +1501,7 @@ export const nachtRecherche = schedules.task({
                 // Nicht firma.name: Maps liefert den SEO-Titel, nicht den Namen.
                 // Ungefiltert landet er im ersten Satz der Mail (Fund 27.08.2026).
                 // Oben schon berechnet, weil die Untergrenze davor greift.
-                firma: nameFuerMail,
+                firma: mailName,
                 stadt: zielstadt,
                 kategorie,
                 nische,

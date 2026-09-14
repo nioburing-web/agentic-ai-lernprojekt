@@ -49,6 +49,21 @@ const ohneNamen = regelBefunde(
 );
 check(ohneNamen.some((b) => b.includes("Firmenname")), "fehlender Firmenname wird gemeldet");
 
+// Freigabe-Runde 14.09.2026: Spalte B trägt den rohen Maps-Titel. Die Prüfung
+// verlangte bis dahin dessen längstes Wort — hier "haftungsbeschränkt" —, also
+// genau die Rechtsform, die im Satz nichts zu suchen hat.
+const mitRechtsform = regelBefunde(
+  {
+    ...zeile(),
+    name: "Fahrschule Tiger UG (haftungsbeschränkt)",
+    stadt: "Nürnberg",
+    nische: "Fahrschule",
+    entwurf: "Hey, bei der Fahrschule Tiger gibt es Theorie am Abend. Probiert ihn aus: https://demo.nio-automation.de/a/abc123 Wäre das einen Blick wert?",
+  },
+  []
+);
+check(!mitRechtsform.some((b) => b.includes("Firmenname")), "bereinigter Name im Text reicht, die Rechtsform wird nicht verlangt");
+
 // ── Branchen-Hook wörtlich ─────────────────────────────────────────────────
 const mitHook = regelBefunde(
   zeile({ entwurf: `Hey, ${HOOK_TIERARZT} Ich baue für die Kleintierpraxis Berg einen Assistenten.` }),
