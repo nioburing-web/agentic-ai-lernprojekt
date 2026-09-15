@@ -51,6 +51,16 @@ verwirft("noreply@studio-schmidt.de", "noreply@");
 verwirft("no-reply@salon-berlin.de", "no-reply@");
 verwirft("job.mueller@praxis-nord.de", "job als erster Namensteil");
 
+console.log("\n=== Platzhalter hinter einer Initiale oder einem Vornamen (15.09.2026) ===");
+// Die Prüfung sah nur den ganzen lokalen Teil und das erste Segment. `a.musterfrau@`
+// wurde so zu "a.musterfrau" und "a", und ging bis in die Freigabe-Runde (Z1708).
+verwirft("a.musterfrau@gmx.de", "Initiale plus musterfrau (Z1708)");
+verwirft("max.mustermann@web.de", "Vorname plus mustermann");
+verwirft("erika_mustermann@gmx.de", "Unterstrich statt Punkt");
+verwirft("test.example@gmail.com", "example als zweites Segment");
+behaelt("hans.muster@steuerberatung-muster.de", "Muster ist auch ein echter Nachname");
+behaelt("anna.beispielhaft@web.de", "beispielhaft ist kein beispiel");
+
 console.log("\n=== Fremde Plattformen ===");
 verwirft("kontakt@treatwell.de", "Buchungsplattform");
 verwirft("info@shore.com", "Salon-Software");

@@ -814,6 +814,10 @@ const PLATZHALTER_LOKALTEILE = [
   "vorname", "vorname.nachname", "name", "email", "e-mail", "adresse",
 ];
 
+// Die Teilmenge, die auch als beliebiges Segment kein echter Mensch sein kann.
+// `muster`, `name` oder `email` bleiben draussen: als Nachname oder Zusatz echt.
+const PLATZHALTER_IN_JEDEM_SEGMENT = ["mustermann", "musterfrau", "beispiel", "example"];
+
 const FREMD_DOMAINS = [
   "studiolution.com", "shore.com", "treatwell.de", "treatwell.com",
   "planity.com", "phorest.com", "salonkee.de", "doctolib.de",
@@ -862,7 +866,12 @@ export function adresseIstUnbrauchbar(email: string): string | null {
   const treffer = [lokal, ersterTeil].find((kandidat) => UNBRAUCHBARE_PREFIXES.includes(kandidat));
   if (treffer) return `Postfach "${treffer}@" liest kein Entscheider`;
 
-  const platzhalter = [lokal, ersterTeil].find((kandidat) => PLATZHALTER_LOKALTEILE.includes(kandidat));
+  // Hinter einer Initiale oder einem Vornamen steht der Platzhalter im zweiten
+  // Segment (`a.musterfrau@`, Z1708 am 15.09.2026) und fiel an beiden Vergleichen
+  // vorbei. Dort aber nur die eindeutigen Woerter: `hans.muster@` ist ein Mensch.
+  const platzhalter =
+    [lokal, ersterTeil].find((kandidat) => PLATZHALTER_LOKALTEILE.includes(kandidat)) ??
+    lokal.split(/[.\-_+]/).find((segment) => PLATZHALTER_IN_JEDEM_SEGMENT.includes(segment));
   if (platzhalter) return `Platzhalter-Adresse ("${platzhalter}@") aus einer Website-Vorlage`;
 
   // Nach dem Dekodieren darf kein Prozentzeichen mehr drinstehen. Bleibt eines
