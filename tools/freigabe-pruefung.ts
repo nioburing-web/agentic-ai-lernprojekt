@@ -131,6 +131,36 @@ export function zeilenAusArgument(arg: string): Set<number> {
 }
 
 /**
+ * Welche PRUEFEN-Zeilen neu-generieren.ts anfassen darf.
+ *
+ * Warum es das gibt (17.09.2026): am 09.09. sollte der Lauf 18 defekte Entwürfe
+ * reparieren und schrieb stattdessen jede PRUEFEN-Zeile neu. Unentdeckte Defekte
+ * stiegen von 1 auf 7, gute Betreffe wurden ersetzt. Seitdem blieben Befund-Zeilen
+ * liegen — am 17.09. waren es 29.
+ *
+ * Ohne Liste: nur Zeilen mit Regel-Befund. Eine saubere Zeile neu zu würfeln ist
+ * bei temperature 0.9 keine Reparatur, sondern ein Risiko.
+ * Mit Liste: genau die genannten Zeilen, sofern sie Kandidaten sind. Was genannt,
+ * aber nicht auf PRUEFEN ist, wird gemeldet statt still übergangen.
+ */
+export function zeilenZumNeuSchreiben(
+  kandidaten: Array<{ nummer: number; befunde: string[] }>,
+  explizit: Set<number>
+): { nehmen: Set<number>; unbekannt: number[] } {
+  const bekannt = new Set(kandidaten.map((k) => k.nummer));
+  if (explizit.size > 0) {
+    return {
+      nehmen: new Set([...explizit].filter((n) => bekannt.has(n))),
+      unbekannt: [...explizit].filter((n) => !bekannt.has(n)),
+    };
+  }
+  return {
+    nehmen: new Set(kandidaten.filter((k) => k.befunde.length > 0).map((k) => k.nummer)),
+    unbekannt: [],
+  };
+}
+
+/**
  * Welche Zeilen dürfen NICHT freigegeben werden. Eine "repariert"-Zeile darf
  * raus — die Reparatur ist ja erledigt. "verworfen" und "prüfen" halten auf.
  */

@@ -24,8 +24,9 @@
  *
  * Zwei Schritte, absichtlich getrennt:
  *
- *   npx tsx --env-file=.env tools/neu-generieren.ts
- *     Erzeugt neu, prüft, legt das Ergebnis in tools/.neue-entwuerfe.json ab.
+ *   npx tsx --env-file=.env tools/neu-generieren.ts [--zeilen=1694,1695]
+ *     Fasst seit dem 17.09.2026 nur PRUEFEN-Zeilen mit Regel-Befund an, oder
+ *     genau die mit --zeilen genannten. Erzeugt neu, prüft, legt das Ergebnis in tools/.neue-entwuerfe.json ab.
  *     Rührt das Sheet nicht an.
  *
  *   npx tsx --env-file=.env tools/neu-generieren.ts --uebernehmen [--alle]
@@ -54,12 +55,19 @@ import { oeffnerIstFloskel, nameFuerMail } from "../src/trigger/entwurf-qualitae
 import { anredeIstGemischt } from "../src/trigger/anrede";
 import { KATEGORIEN } from "../src/trigger/nischen";
 import type { Kategorie, Nische } from "../src/trigger/nischen";
+import { regelBefunde, zeilenAusArgument, zeilenZumNeuSchreiben } from "./freigabe-pruefung";
 
 const QUEUE_TAB = "Outreach Queue";
 const MIN_WEBSITE_TEXT = 300; // gleiches Quality-Gate wie in nacht-recherche
 const UEBERNEHMEN = process.argv.includes("--uebernehmen");
 const ALLE = process.argv.includes("--alle");
 const ERGEBNIS_DATEI = "tools/.neue-entwuerfe.json";
+//   --auswahl            nur anzeigen, welche Zeilen angefasst würden, dann Ende.
+const AUSWAHL = process.argv.includes("--auswahl");
+//   --zeilen=1694,1695   nur diese Zeilen, auch saubere. Ohne: nur Zeilen mit Befund.
+const NUR_ZEILEN = zeilenAusArgument(
+  (process.argv.find((a) => a.startsWith("--zeilen=")) ?? "").split("=").slice(1).join("=")
+);
 
 type Zeile = {
   nr: number;
@@ -189,8 +197,47 @@ async function main(): Promise<void> {
     });
   });
 
-  console.log(`${offen.length} Zeilen auf PRUEFEN, die neu geschrieben werden können`);
+  // ── Auswahl: welche Zeilen dieser Lauf überhaupt anfassen darf ──────────────
+  // Bis zum 17.09.2026 nahm der Lauf jede PRUEFEN-Zeile, auch die sauberen
+  // (Schaden 09.09.: 1 → 7 unentdeckte Defekte). Jetzt nur Zeilen mit Befund,
+  // oder genau die mit --zeilen genannten. Der Befund kommt aus derselben
+  // Prüfung wie in der Freigabe-Runde, und zwar gegen die Betreffe, die schon
+  // draussen sind — gegen alleBetreffe wäre jede Zeile ihr eigenes Duplikat.
+  const verschickteBetreffe = rows
+    .slice(1)
+    .filter((r) => {
+      const s = String(r?.[5] ?? "").trim();
+      return s === "GESENDET" || s.startsWith("NACHGEFASST");
+    })
+    .map((r) => String(r?.[8] ?? ""))
+    .filter((b) => b.length > 0);
+  const auswahl = zeilenZumNeuSchreiben(
+    offen.map((z) => ({
+      nummer: z.nr,
+      befunde: regelBefunde(
+        { name: z.firma, entwurf: z.altEntwurf, betreff: z.altBetreff, nische: z.nische.name, stadt: z.stadt },
+        verschickteBetreffe
+      ),
+    })),
+    NUR_ZEILEN
+  );
+  if (auswahl.unbekannt.length) {
+    console.log(`genannt, aber nicht neu schreibbar (nicht PRUEFEN oder übersprungen): ${auswahl.unbekannt.join(", ")}`);
+  }
+  const vorher = offen.length;
+  offen.splice(0, offen.length, ...offen.filter((z) => auswahl.nehmen.has(z.nr)));
+
+  console.log(
+    `${offen.length} von ${vorher} PRUEFEN-Zeilen werden angefasst ` +
+      `(${NUR_ZEILEN.size ? "per --zeilen" : "nur mit Befund"})`
+  );
   if (uebersprungen.length) console.log("übersprungen:\n  " + uebersprungen.join("\n  "));
+
+  // Nur zeigen, was angefasst würde — kostet weder Website-Abrufe noch LLM.
+  if (AUSWAHL) {
+    for (const z of offen) console.log(`  ${z.nr} | ${z.firma.slice(0, 40)}`);
+    return;
+  }
 
   // ── Schritt 2: das Ergebnis des Probelaufs ins Sheet schreiben ──────────────
   if (UEBERNEHMEN) {
