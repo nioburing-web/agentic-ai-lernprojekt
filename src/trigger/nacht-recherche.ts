@@ -172,10 +172,39 @@ export async function zaehleOffenePruefungen(
   return zeilen.slice(1).filter((z) => String(z?.[0] ?? "").trim() === "PRUEFEN").length;
 }
 
+/**
+ * Erkennungsschlüssel eines Betriebs, bevor seine Website bekannt ist.
+ *
+ * Warum es das gibt (17.09.2026): Place Details wurden für jeden Treffer einer
+ * Suche geholt, Dubletten fielen erst danach an der E-Mail-Adresse auf. Die
+ * Details-Abrufe sind der Kostentreiber des Laufs. Spalte B trägt den rohen
+ * Maps-Titel, Spalte C die Suchstadt — beides liegt vor dem Abruf schon vor.
+ *
+ * Bewusst ohne Normalisierung über Gross/klein und Leerzeichen hinaus: ein
+ * falsch als bekannt erkannter Betrieb ist ein verlorener Lead, ein doppelter
+ * Abruf nur ein paar Cent. Die E-Mail-Prüfung danach bleibt als zweites Netz.
+ */
+export function betriebsSchluessel(name: string, stadt: string): string | null {
+  const n = (name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const s = (stadt ?? "").trim().toLowerCase();
+  if (!n || !s) return null;
+  return `${n}|${s}`;
+}
+
+/** Alle Betriebe aus den Queue-Zeilen A:D (Kopfzeile inklusive). */
+export function bekannteBetriebe(rows: unknown[][]): Set<string> {
+  const betriebe = new Set<string>();
+  for (const row of rows.slice(1)) {
+    const schluessel = betriebsSchluessel(String(row?.[1] ?? ""), String(row?.[2] ?? ""));
+    if (schluessel) betriebe.add(schluessel);
+  }
+  return betriebe;
+}
+
 async function ladeVorhandeneKontakte(
   sheets: ReturnType<typeof googleSheets>,
   sheetId: string
-): Promise<Set<string>> {
+): Promise<{ kontakte: Set<string>; betriebe: Set<string> }> {
   const response = await mitWiederholung("vorhandene Kontakte laden", () =>
     sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
@@ -186,7 +215,7 @@ async function ladeVorhandeneKontakte(
   for (const row of rows.slice(1)) {
     if (row[3]) kontakte.add((row[3] as string).toLowerCase().trim());
   }
-  return kontakte;
+  return { kontakte, betriebe: bekannteBetriebe(rows) };
 }
 
 // Letzte Zeile (1-basiert, ohne Header-Offset), die irgendwo in A–U noch etwas stehen hat.
@@ -1367,7 +1396,11 @@ export const nachtRecherche = schedules.task({
       return { entwuerfe: 0, kategorie: "-", status: "-", uebersprungen: grund };
     }
 
-    const vorhandene = await ladeVorhandeneKontakte(sheets, sheetId);
+    const { kontakte: vorhandene, betriebe: bekannt } = await ladeVorhandeneKontakte(sheets, sheetId);
+    // Kostenbremse (17.09.2026): wie viele Place-Details-Abrufe der Lauf macht und
+    // wie viele er vorher einspart. Steht in der Rueckgabe, damit die Wirkung
+    // gemessen und nicht geschaetzt wird.
+    const maps = { detailsAbrufe: 0, bekanntVorDetails: 0, nameUnbrauchbarVorDetails: 0 };
     // Betreff-Historie: verhindert, dass Nacht für Nacht dieselben Formulierungen
     // rausgehen. Wächst im Lauf mit jedem neuen Betreff weiter.
     const verbrauchteBetreffe = await ladeLetzteBetreffe(sheets, sheetId);
@@ -1463,6 +1496,27 @@ export const nachtRecherche = schedules.task({
             // darf nicht die restlichen Shops dieses Begriffs mitreißen (vorher lag
             // das try/catch pro Suchbegriff → ein Fehler killte ~20 Shops).
             try {
+              // Beides vor dem kostenpflichtigen Details-Abruf: der Betrieb steht
+              // schon in der Queue, oder sein Name taugt ohnehin nicht fuer die Mail.
+              // Bis zum 17.09.2026 liefen beide Pruefungen erst danach.
+              const schluessel = betriebsSchluessel(firma.name, zielstadt);
+              if (schluessel && bekannt.has(schluessel)) {
+                maps.bekanntVorDetails++;
+                continue;
+              }
+
+              // Namens-Untergrenze, vor dem LLM-Aufruf: Maps liefert gelegentlich
+              // einen Titel, der kein Name ist ("lz" fuer eine Tierarztpraxis,
+              // 04.09.2026). Der Prompt muss den Namen nennen, also stuende er im
+              // ersten Satz. Lieber ueberspringen als falsch anschreiben.
+              const mailName = nameFuerMail(firma.name, zielstadt);
+              if (!nameIstBrauchbar(mailName)) {
+                maps.nameUnbrauchbarVorDetails++;
+                console.log(`Firmenname unbrauchbar ("${firma.name}" -> "${mailName}") – übersprungen`);
+                continue;
+              }
+
+              maps.detailsAbrufe++;
               const website = await holeWebsiteVonPlaceDetails(firma.placeId);
               if (!website) continue;
 
@@ -1474,16 +1528,6 @@ export const nachtRecherche = schedules.task({
               const adressGrund = adresseIstUnbrauchbar(email);
               if (adressGrund) {
                 console.log(`Adresse unbrauchbar (${adressGrund}): ${firma.name} → ${email} – übersprungen`);
-                continue;
-              }
-
-              // Namens-Untergrenze, vor dem LLM-Aufruf: Maps liefert gelegentlich
-              // einen Titel, der kein Name ist ("lz" fuer eine Tierarztpraxis,
-              // 04.09.2026). Der Prompt muss den Namen nennen, also stuende er im
-              // ersten Satz. Lieber ueberspringen als falsch anschreiben.
-              const mailName = nameFuerMail(firma.name, zielstadt);
-              if (!nameIstBrauchbar(mailName)) {
-                console.log(`Firmenname unbrauchbar ("${firma.name}" -> "${mailName}"): ${website} – übersprungen`);
                 continue;
               }
 
@@ -1551,6 +1595,7 @@ export const nachtRecherche = schedules.task({
                 QUEUE_TAB, zeilenStatus, nische.name, kategorie.slug
               );
               vorhandene.add(email.toLowerCase());
+              if (schluessel) bekannt.add(schluessel);
               emailGespeichert++;
 
               console.log(`${zeilenStatus}: ${firma.name} → ${email} (${zielstadt}, ${nische.name}, Demo-ID ${demoId})`);
@@ -1596,6 +1641,7 @@ export const nachtRecherche = schedules.task({
       status: draftStatus,
       mangelhaft,
       nachfassen: bericht,
+      maps,
     };
   },
 });
