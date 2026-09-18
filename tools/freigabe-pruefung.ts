@@ -171,3 +171,20 @@ export function gesperrteZeilen(befunde: Map<number, Befund[]>): Set<number> {
       .map(([nr]) => nr)
   );
 }
+
+/**
+ * Baut aus einer rohen Sheet-Zeile die Eingabe fuer regelBefunde().
+ *
+ * Warum es das gibt (18.09.2026): lesefassung.ts und freigabe-runde.ts bauten
+ * diese Eingabe getrennt, und der Lesefassung fehlte `stadt`. Ohne Stadt prueft
+ * nameFuerMail gegen den rohen Maps-Titel samt Ortszusatz und meldet
+ * "Firmenname fehlt". Die Lesefassung versteckte so eine Zeile, die --freigeben
+ * mitgenommen haette: sie waere ungelesen rausgegangen. Aufgefallen nur, weil
+ * der Trockenlauf 15 statt 14 zeigte. Eine Stelle statt zwei.
+ */
+export function pruefEingabeAusZeile(r: readonly unknown[]): {
+  name: string; stadt: string; entwurf: string; betreff: string; nische: string;
+} {
+  const feld = (i: number): string => String(r[i] ?? "");
+  return { name: feld(1), stadt: feld(2), entwurf: feld(4), betreff: feld(8), nische: feld(19) };
+}

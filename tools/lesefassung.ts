@@ -19,7 +19,7 @@
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import { readFileSync, writeFileSync } from "node:fs";
-import { regelBefunde } from "./freigabe-pruefung";
+import { regelBefunde, pruefEingabeAusZeile } from "./freigabe-pruefung";
 import { anredeIstGemischt } from "../src/trigger/anrede";
 
 const QUEUE_TAB = "Outreach Queue";
@@ -66,12 +66,7 @@ async function main(): Promise<void> {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i] ?? [];
     if (String(r[5] ?? "").trim() !== "PRUEFEN") continue;
-    const z = {
-      name: String(r[1] ?? ""),
-      entwurf: String(r[4] ?? ""),
-      betreff: String(r[8] ?? ""),
-      nische: String(r[19] ?? ""),
-    };
+    const z = pruefEingabeAusZeile(r);
     // Dieselbe Reihenfolge wie in freigabe-runde.ts.
     const befunde = regelBefunde(z, verbrauchte);
     if (z.betreff && z.betreff !== z.betreff.toLowerCase()) befunde.push("Betreff nicht klein");

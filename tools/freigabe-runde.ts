@@ -39,7 +39,7 @@ import {
   betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
 } from "../src/trigger/entwurf-qualitaet";
 import { adresseIstUnbrauchbar } from "../src/trigger/nacht-recherche";
-import { regelBefunde, gesperrteZeilen, zeilenAusArgument } from "./freigabe-pruefung";
+import { regelBefunde, gesperrteZeilen, zeilenAusArgument, pruefEingabeAusZeile } from "./freigabe-pruefung";
 import type { Befund } from "./freigabe-pruefung";
 
 const QUEUE_TAB = "Outreach Queue";
@@ -110,15 +110,7 @@ async function main(): Promise<void> {
   for (let i = 1; i < rohzeilen.length; i++) {
     const r = rohzeilen[i] ?? [];
     if ((r[5] ?? "").trim() !== "PRUEFEN") continue;
-    zeilen.push({
-      nummer: i + 1,
-      name: (r[1] as string) ?? "",
-      stadt: (r[2] as string) ?? "",
-      kontakt: (r[3] as string) ?? "",
-      entwurf: (r[4] as string) ?? "",
-      betreff: (r[8] as string) ?? "",
-      nische: (r[19] as string) ?? "",
-    });
+    zeilen.push({ nummer: i + 1, kontakt: String(r[3] ?? ""), ...pruefEingabeAusZeile(r) });
   }
 
   console.log(`${zeilen.length} Zeilen auf PRUEFEN\n`);
