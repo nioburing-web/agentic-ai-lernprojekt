@@ -55,7 +55,7 @@ import { oeffnerIstFloskel, nameFuerMail } from "../src/trigger/entwurf-qualitae
 import { anredeIstGemischt } from "../src/trigger/anrede";
 import { KATEGORIEN } from "../src/trigger/nischen";
 import type { Kategorie, Nische } from "../src/trigger/nischen";
-import { regelBefunde, zeilenAusArgument, zeilenZumNeuSchreiben } from "./freigabe-pruefung";
+import { regelBefunde, zeilenAusArgument, zeilenZumNeuSchreiben, betreffVergleichFuer } from "./freigabe-pruefung";
 
 const QUEUE_TAB = "Outreach Queue";
 const MIN_WEBSITE_TEXT = 300; // gleiches Quality-Gate wie in nacht-recherche
@@ -201,22 +201,15 @@ async function main(): Promise<void> {
   // Bis zum 17.09.2026 nahm der Lauf jede PRUEFEN-Zeile, auch die sauberen
   // (Schaden 09.09.: 1 → 7 unentdeckte Defekte). Jetzt nur Zeilen mit Befund,
   // oder genau die mit --zeilen genannten. Der Befund kommt aus derselben
-  // Prüfung wie in der Freigabe-Runde, und zwar gegen die Betreffe, die schon
-  // draussen sind — gegen alleBetreffe wäre jede Zeile ihr eigenes Duplikat.
-  const verschickteBetreffe = rows
-    .slice(1)
-    .filter((r) => {
-      const s = String(r?.[5] ?? "").trim();
-      return s === "GESENDET" || s.startsWith("NACHGEFASST");
-    })
-    .map((r) => String(r?.[8] ?? ""))
-    .filter((b) => b.length > 0);
+  // Prüfung wie in der Freigabe-Runde, gegen dieselbe Vergleichsliste —
+  // gegen alleBetreffe wäre jede Zeile ihr eigenes Duplikat (21.09.2026:
+  // die Liste lebt in betreffVergleichFuer, nicht mehr hier).
   const auswahl = zeilenZumNeuSchreiben(
     offen.map((z) => ({
       nummer: z.nr,
       befunde: regelBefunde(
         { name: z.firma, entwurf: z.altEntwurf, betreff: z.altBetreff, nische: z.nische.name, stadt: z.stadt },
-        verschickteBetreffe
+        betreffVergleichFuer(rows, z.nr)
       ),
     })),
     NUR_ZEILEN

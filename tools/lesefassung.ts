@@ -19,7 +19,7 @@
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
 import { readFileSync, writeFileSync } from "node:fs";
-import { regelBefunde, pruefEingabeAusZeile } from "./freigabe-pruefung";
+import { regelBefunde, pruefEingabeAusZeile, betreffVergleichFuer } from "./freigabe-pruefung";
 import { anredeIstGemischt } from "../src/trigger/anrede";
 
 const QUEUE_TAB = "Outreach Queue";
@@ -52,12 +52,6 @@ async function main(): Promise<void> {
   });
   const rows = antwort.data.values ?? [];
 
-  const verbrauchte: string[] = [];
-  for (const r of rows.slice(1)) {
-    const st = String(r?.[5] ?? "").trim();
-    if ((st === "GESENDET" || st.startsWith("NACHGEFASST")) && r?.[8]) verbrauchte.push(String(r[8]));
-  }
-
   const teile: string[] = [];
   const kurz: string[] = [];
   let n = 0;
@@ -68,7 +62,7 @@ async function main(): Promise<void> {
     if (String(r[5] ?? "").trim() !== "PRUEFEN") continue;
     const z = pruefEingabeAusZeile(r);
     // Dieselbe Reihenfolge wie in freigabe-runde.ts.
-    const befunde = regelBefunde(z, verbrauchte);
+    const befunde = regelBefunde(z, betreffVergleichFuer(rows, i + 1));
     if (z.betreff && z.betreff !== z.betreff.toLowerCase()) befunde.push("Betreff nicht klein");
     if (anredeIstGemischt(z.entwurf)) befunde.push("Anrede gemischt");
     if (befunde.length) {

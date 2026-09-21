@@ -39,7 +39,7 @@ import {
   betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
 } from "../src/trigger/entwurf-qualitaet";
 import { adresseIstUnbrauchbar } from "../src/trigger/nacht-recherche";
-import { regelBefunde, gesperrteZeilen, zeilenAusArgument, pruefEingabeAusZeile } from "./freigabe-pruefung";
+import { regelBefunde, gesperrteZeilen, zeilenAusArgument, pruefEingabeAusZeile, betreffVergleichFuer } from "./freigabe-pruefung";
 import type { Befund } from "./freigabe-pruefung";
 
 const QUEUE_TAB = "Outreach Queue";
@@ -94,17 +94,6 @@ async function main(): Promise<void> {
     range: `${QUEUE_TAB}!A:U`,
   });
   const rohzeilen = antwort.data.values ?? [];
-
-  // Betreffe, die schon draussen sind. Gegen die prüft betreffIstBrauchbar —
-  // ein Betreff, der bereits verschickt wurde, darf nicht ein zweites Mal raus.
-  const verbrauchteBetreffe: string[] = [];
-  for (let i = 1; i < rohzeilen.length; i++) {
-    const r = rohzeilen[i] ?? [];
-    const status = (r[5] ?? "").trim();
-    if ((status === "GESENDET" || status.startsWith("NACHGEFASST")) && r[8]) {
-      verbrauchteBetreffe.push(String(r[8]));
-    }
-  }
 
   const zeilen: Zeile[] = [];
   for (let i = 1; i < rohzeilen.length; i++) {
@@ -191,7 +180,9 @@ async function main(): Promise<void> {
     // ── Die vier Regeln, die nacht-recherche nur ins Log schreibt ───────────
     // Geprüft wird die reparierte Fassung, nicht das Original — sonst meldet
     // die Runde einen Mangel, den sie zwei Zeilen vorher selbst behoben hat.
-    for (const hinweis of regelBefunde({ ...z, entwurf: text }, verbrauchteBetreffe)) {
+    // Verbraucht ist, was draussen ist oder in einer früheren offenen Zeile
+    // steht — Liste und Begründung in betreffVergleichFuer (21.09.2026).
+    for (const hinweis of regelBefunde({ ...z, entwurf: text }, betreffVergleichFuer(rohzeilen, z.nummer))) {
       liste.push({ art: "prüfen", hinweis });
     }
 
