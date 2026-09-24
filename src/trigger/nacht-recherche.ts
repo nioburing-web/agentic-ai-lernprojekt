@@ -1051,7 +1051,33 @@ export type EntwurfKontext = {
   verbrauchteBetreffe?: string[];
   /** Optional. Fehlt er, misst der Lauf nichts — Dry-Runs sollen nichts mitzaehlen. */
   nachfassen?: Nachfasszaehler;
+  /**
+   * Optional. Wer den Text schreibt. Fehlt er, schreibt `gpt-4o-mini` bei 0.9,
+   * so wie seit Juni. Austauschbar seit dem 24.09.2026 für den Modellvergleich
+   * (`tools/modell-vergleich.ts`): Grammatik war zu dem Zeitpunkt der häufigste
+   * Grund, beim Fit-Lesen zu verwerfen, und der Verdacht fiel auf Modell und
+   * temperature. Die Prüfstrecke darunter bleibt für jeden Schreiber dieselbe,
+   * sonst vergleicht man Strecken statt Modelle.
+   */
+  schreiber?: Schreiber;
 };
+
+export type Nachricht = { role: "system" | "user"; content: string };
+export type Schreiber = (nachrichten: Nachricht[]) => Promise<string>;
+
+/** Der Schreiber, mit dem `nacht-recherche` produktiv läuft. */
+export function standardSchreiber(): Schreiber {
+  const openai = getOpenAI();
+  return async (nachrichten) => {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.9,
+      max_tokens: 350,
+      messages: nachrichten,
+    });
+    return completion.choices[0]?.message?.content?.trim() ?? "";
+  };
+}
 
 export async function generiereEmailEntwurf(
   kontext: EntwurfKontext
@@ -1059,6 +1085,7 @@ export async function generiereEmailEntwurf(
   const {
     firma, stadt, kategorie, nische, websiteText, link,
     betreffIndex = 0, verbrauchteBetreffe = [], nachfassen,
+    schreiber = standardSchreiber(),
   } = kontext;
 
   // Was auch im zweiten Anlauf nicht gehalten hat. Bis zum 06.09.2026 stand das
@@ -1067,7 +1094,6 @@ export async function generiereEmailEntwurf(
   // Hook-Regel auch nach dem Neuversuch. Eine Pruefung, deren Ergebnis niemand
   // sieht und die nichts aufhaelt, ist keine Pruefung.
   const maengel: string[] = [];
-  const openai = getOpenAI();
   const branche = nische.name;
   const branchenHinweis = nische.hook;
   const websiteAuszug = websiteText && websiteText.trim().length > 80 ? websiteText.trim().slice(0, 1800) : "";
@@ -1145,15 +1171,7 @@ EMAIL: <email-text>`,
 
   async function erzeuge(extra?: string, ohneHook = false): Promise<{ betreff: string; inhalt: string }> {
     const basis = ohneHook ? baueNachrichten(true) : nachrichten;
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.9,
-      max_tokens: 350,
-      messages: extra
-        ? [...basis, { role: "user" as const, content: extra }]
-        : basis,
-    });
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+    const raw = await schreiber(extra ? [...basis, { role: "user" as const, content: extra }] : basis);
     return zerlegeAntwort(raw);
   }
 

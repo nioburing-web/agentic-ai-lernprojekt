@@ -38,3 +38,6 @@ buchhalter-agent/node_modules/
 # und ausserdem erzeugter Output, kein Quelltext.
 tools/.backup-entwuerfe.json
 tools/.neue-entwuerfe.json
+
+# Zwischenstaende von tools/modell-vergleich.ts: Lesefassung und Blind-Schluessel.
+tools/.modell-vergleich/
