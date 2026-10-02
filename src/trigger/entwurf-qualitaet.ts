@@ -391,3 +391,48 @@ export function oeffnerIstFloskel(inhalt: string): boolean {
   const ersterSatz = (ohneAnrede.split(/(?<=[.!?])\s/)[0] ?? "").trim();
   return VERBOTENE_OEFFNER.some((muster) => muster.test(ersterSatz));
 }
+
+/**
+ * Regie-Sätze: Stellen, an denen das Modell eine Anweisung aus der
+ * Struktur-Vorgabe als Text in die Mail schreibt, statt sie umzusetzen.
+ *
+ * Gefunden am 02.10.2026 im Modellvergleich: `gpt-6-luna` las "Führ den
+ * Demo-Link als Antwort auf genau diese Frage ein" und schrieb "Als Antwort auf
+ * die Frage: Hier läuft …". Nio verwarf zwei von drei solcher Entwürfe. Ein
+ * Satz, der so beginnt, ist immer Regie — mitten im Satz ("der als Antwort auf
+ * eine Anfrage …") ist es normales Deutsch und bleibt erlaubt.
+ *
+ * Gibt die gefundene Stelle zurück, damit Neuversuch und Freigabe-Runde sie
+ * zitieren können, oder null.
+ */
+const REGIE_SAETZE: RegExp[] = [
+  /(?:^|[.!?:]\s+|\n\s*)(als antwort (?:auf (?:die|diese|eure|deine|ihre) frage|darauf))\b/i,
+];
+
+/**
+ * Steht der Anfang des Google-Maps-Titels wörtlich in der Mail? Liefert das
+ * längste Präfix ab `minWoerter` Wörtern, sonst null.
+ *
+ * NUR ALS HINWEIS für die Lesefassung, nie als Sperre (Nio, 02.10.2026).
+ * Gemessen gegen Nios Urteile seit dem 15.09.: ab 5 Wörtern 26 Verworfene
+ * getroffen, aber auch 8 Freigaben mit echten langen Namen ("Praxis für
+ * Kleintiermedizin …"). Wortzählen allein trennt einen Namen nicht von einem
+ * SEO-Titel, ein Mensch beim Lesen schon.
+ */
+export function mapsTitelImText(name: string, inhalt: string, minWoerter = 5): string | null {
+  const woerter = (name ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const text = (inhalt ?? "").replace(/\s+/g, " ");
+  for (let k = woerter.length; k >= minWoerter; k--) {
+    const praefix = woerter.slice(0, k).join(" ");
+    if (text.includes(praefix)) return praefix;
+  }
+  return null;
+}
+
+export function regieSatzImText(inhalt: string): string | null {
+  for (const muster of REGIE_SAETZE) {
+    const treffer = (inhalt ?? "").match(muster);
+    if (treffer?.[1]) return treffer[1];
+  }
+  return null;
+}

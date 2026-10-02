@@ -21,6 +21,7 @@ import { GoogleAuth } from "google-auth-library";
 import { readFileSync, writeFileSync } from "node:fs";
 import { regelBefunde, pruefEingabeAusZeile, betreffVergleichFuer } from "./freigabe-pruefung";
 import { anredeIstGemischt } from "../src/trigger/anrede";
+import { mapsTitelImText } from "../src/trigger/entwurf-qualitaet";
 
 const QUEUE_TAB = "Outreach Queue";
 const zielArg = process.argv[2];
@@ -76,6 +77,13 @@ async function main(): Promise<void> {
     teile.push(`## ${n}. Zeile ${nr} — ${z.name}`);
     teile.push(`**${String(r[2] ?? "")} · ${z.nische} · ${String(r[3] ?? "")}**`);
     teile.push("");
+    // Hinweis, keine Sperre (02.10.2026): ein langer Maps-Titel im Text ist oft
+    // ein SEO-Titel, manchmal aber der echte Name. Das entscheidet der Mensch.
+    const titel = mapsTitelImText(z.name, z.entwurf);
+    if (titel) {
+      teile.push(`⚠️ **Hinweis:** Maps-Titel steht wörtlich im Text: „${titel}“. Echter Name oder SEO-Titel?`);
+      teile.push("");
+    }
     teile.push(`**Betreff:** ${z.betreff}`);
     teile.push("");
     teile.push(z.entwurf.split(/\r?\n/).map((x) => "> " + x).join("\n"));

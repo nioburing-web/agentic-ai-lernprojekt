@@ -7,7 +7,7 @@
 // 2. Verbotener Beobachtungs-Einstieg: der Prompt untersagt "ich habe gesehen"
 //    ausdrücklich, 2 von 60 Entwürfen fingen trotzdem so an.
 
-import { saubererBetriebsname, oeffnerIstFloskel, nameIstBrauchbar, nameFuerMail } from "../src/trigger/entwurf-qualitaet";
+import { saubererBetriebsname, oeffnerIstFloskel, nameIstBrauchbar, nameFuerMail, regieSatzImText, mapsTitelImText } from "../src/trigger/entwurf-qualitaet";
 
 let bestanden = 0;
 let fehlgeschlagen = 0;
@@ -226,6 +226,37 @@ gleich(nameFuerMail("addVALUE audit&tax Leipzig GmbH, Wirtschaftsprüfer", "Leip
 gleich(nameFuerMail("Kanzlei Ersöz (SERS RA GmbH)", "Berlin"), "Kanzlei Ersöz (SERS RA)", "kein Leerzeichen vor der schließenden Klammer");
 gleich(nameFuerMail("Buchhaltung Kirchner UG ( haftungsbeschränkt)", "Köln"), "Buchhaltung Kirchner", "Leerzeichen in der Klammer");
 gleich(nameFuerMail("Kramer & Nübel Steuerberater Part mbB", "Leipzig"), "Kramer & Nübel Steuerberater", "'Part mbB' ohne G");
+
+// ─── regieSatzImText ─────────────────────────────────────────────────────────
+// 02.10.2026, Modellvergleich: gpt-6-luna nahm die Struktur-Vorgabe "Führ den
+// Demo-Link als Antwort auf genau diese Frage ein" wörtlich und schrieb
+// "Als Antwort auf die Frage: Hier läuft …". Nio verwarf 2 von 3 solcher
+// Entwürfe als "anderes". Die Fälle unten sind wörtlich aus dem Vergleich.
+
+check(regieSatzImText("Wie fangt ihr Reservierungsanfragen ab? Ich bin Nio aus Hamburg.\n\nAls Antwort auf die Frage: Hier läuft ein Assistent.") !== null, "Regie-Satz 'Als Antwort auf die Frage:' am Absatzanfang");
+check(regieSatzImText("Ich bin Nio, baue KI-Agenten in Hamburg. Als Antwort auf die Frage hier eine Demo – läuft.") !== null, "Regie-Satz mitten im Absatz nach Satzende");
+check(regieSatzImText("Ich bin Nio.\n\nAls Antwort darauf: Hier läuft ein digitaler Assistent.") !== null, "Variante 'Als Antwort darauf:'");
+check(regieSatzImText("Hey, ihr bekommt viele Anfragen. Ich habe einen Assistenten gebaut, der als Antwort auf eine Anfrage sofort Name und Wunschzeit aufnimmt.") === null, "'als Antwort auf' mitten im Satz ist normale Sprache");
+check(regieSatzImText("Hey, wie fangt ihr Anfragen ab, wenn gerade niemand frei ist? Hier läuft ein Assistent, den ihr in Sekunden ausprobieren könnt.") === null, "sauberer Entwurf ohne Regie-Satz");
+
+// ─── mapsTitelImText (nur Hinweis, sperrt nicht) ─────────────────────────────
+// 02.10.2026: gemessen gegen Nios Urteile seit 15.09. Ab 5 Wörtern Präfix des
+// Maps-Titels: 26 Verworfene getroffen, aber auch 8 Freigaben mit echten langen
+// Namen. Deshalb nur ein Hinweis in der Lesefassung, keine Sperre (Nio, Variante 2).
+
+gleich(
+  mapsTitelImText("Friseur Düsseldorf MEK Hair Art Spezialisten für Blond Balayage Detox und Olaplex", "Hey, bei Friseur Düsseldorf MEK Hair Art Spezialisten für Blond Balayage Detox und Olaplex steht gesundes Haar im Mittelpunkt.") ?? "",
+  "Friseur Düsseldorf MEK Hair Art Spezialisten für Blond Balayage Detox und Olaplex",
+  "SEO-Titel komplett im Text (1965)"
+);
+gleich(
+  mapsTitelImText("Zahnärzte am Phönixsee MVZ- Implantologie & Zahnästhetik in Dortmund", "Hey, die 300 Implantate bei Zahnärzte am Phönixsee MVZ- Implantologie & Zahnästhetik sind beeindruckend.") ?? "",
+  "Zahnärzte am Phönixsee MVZ- Implantologie & Zahnästhetik",
+  "Präfix des Titels ohne Stadt (2013)"
+);
+check(mapsTitelImText("Praxis für Physiotherapie Am Markt Leipzig", "Hey, bei der Praxis für Physio läuft viel.") === null, "nur 3 Wörter Präfix: kein Hinweis");
+check(mapsTitelImText("Kawa Friseur", "Hey, bei Kawa Friseur schneidet ihr Haare.") === null, "kurzer Name: kein Hinweis");
+check(mapsTitelImText("", "irgendwas") === null, "leerer Name: kein Hinweis");
 
 console.log(`\n${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen`);
 process.exit(fehlgeschlagen > 0 ? 1 : 0);

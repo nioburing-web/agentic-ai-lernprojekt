@@ -27,7 +27,7 @@ import { GoogleAuth } from "google-auth-library";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import {
-  generiereEmailEntwurf, holeWebsiteText, standardSchreiber,
+  generiereEmailEntwurf, holeWebsiteText, gpt4oMiniSchreiber,
 } from "../src/trigger/nacht-recherche";
 import type { Schreiber } from "../src/trigger/nacht-recherche";
 import { nameFuerMail } from "../src/trigger/entwurf-qualitaet";
@@ -83,7 +83,7 @@ function haikuSchreiber(): Schreiber {
 }
 
 const SCHREIBER: Record<string, () => Schreiber> = {
-  "4o-mini": standardSchreiber,
+  "4o-mini": gpt4oMiniSchreiber,
   luna: lunaSchreiber,
   haiku: haikuSchreiber,
 };

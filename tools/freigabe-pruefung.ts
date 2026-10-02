@@ -12,7 +12,7 @@ import {
   vorlageIstAbgeschrieben,
   vorlagenFuer,
 } from "../src/trigger/nacht-recherche";
-import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail } from "../src/trigger/entwurf-qualitaet";
+import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
 
 export type Befund =
@@ -99,6 +99,9 @@ export function regelBefunde(
   }
 
   if (oeffnerIstFloskel(zeile.entwurf)) out.push("Floskel-Einstieg");
+  // 02.10.2026: Anweisung aus der Struktur-Vorgabe als Text in der Mail.
+  const regie = regieSatzImText(zeile.entwurf);
+  if (regie) out.push(`Regie-Satz im Text: "${regie}"`);
   if (!betreffIstBrauchbar(zeile.betreff, verbrauchteBetreffe)) {
     out.push(`Betreff unbrauchbar oder doppelt: "${zeile.betreff}"`);
   }

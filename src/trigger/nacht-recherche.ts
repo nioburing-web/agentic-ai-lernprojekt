@@ -4,6 +4,7 @@ import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
 import {
   nameFuerMail, oeffnerIstFloskel, nameIstBrauchbar,
   betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
+  regieSatzImText,
 } from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
 import {
@@ -554,7 +555,7 @@ export function mailAngles(
       name: "frage-dann-demo",
       struktur: `1. Steig mit EINER konkreten Beobachtung aus dem Website-Auszug ein (echtes Detail dieses Betriebs).
 2. Stell eine echte, kurze Frage dazu, wie sie Anfragen heute abfangen, wenn gerade niemand frei ist — so wie jemand fragt, der das Thema versteht, nicht wie ein Verkäufer.
-3. Führ den Demo-Link als Antwort auf genau diese Frage ein. Inhalt: läuft, in Sekunden ausprobiert. Eigene Formulierung.`,
+3. Der Demo-Link ist deine Antwort auf diese Frage: zeig ihn, statt sie zu beantworten. Inhalt: läuft, in Sekunden ausprobiert. Eigene Formulierung, und schreib nicht dazu, dass es eine Antwort ist.`,
     },
     {
       name: "demo-zuerst",
@@ -1052,8 +1053,8 @@ export type EntwurfKontext = {
   /** Optional. Fehlt er, misst der Lauf nichts — Dry-Runs sollen nichts mitzaehlen. */
   nachfassen?: Nachfasszaehler;
   /**
-   * Optional. Wer den Text schreibt. Fehlt er, schreibt `gpt-4o-mini` bei 0.9,
-   * so wie seit Juni. Austauschbar seit dem 24.09.2026 für den Modellvergleich
+   * Optional. Wer den Text schreibt. Fehlt er, schreibt `standardSchreiber`
+   * (seit 02.10.2026 `gpt-6-luna`, vorher `gpt-4o-mini` bei 0.9). Austauschbar seit dem 24.09.2026 für den Modellvergleich
    * (`tools/modell-vergleich.ts`): Grammatik war zu dem Zeitpunkt der häufigste
    * Grund, beim Fit-Lesen zu verwerfen, und der Verdacht fiel auf Modell und
    * temperature. Die Prüfstrecke darunter bleibt für jeden Schreiber dieselbe,
@@ -1065,8 +1066,30 @@ export type EntwurfKontext = {
 export type Nachricht = { role: "system" | "user"; content: string };
 export type Schreiber = (nachrichten: Nachricht[]) => Promise<string>;
 
-/** Der Schreiber, mit dem `nacht-recherche` produktiv läuft. */
+/**
+ * Der Schreiber, mit dem `nacht-recherche` produktiv läuft.
+ *
+ * Seit 02.10.2026 `gpt-6-luna` statt `gpt-4o-mini` bei 0.9. Blinder Vergleich
+ * auf 7 Betrieben (decisions/log.md, 24.09. + 02.10.): Luna 0 Grammatikfehler
+ * und 0 Regel-Befunde, 4o-mini 1 bzw. 4, Haiku 4 Grammatikfehler. Zeitmessung
+ * pro Entwurf gleichauf (3–8 s gegen 3–9 s), die 900 s des Tasks reichen.
+ * Reasoning-Modell: kein temperature, das Tokenlimit zählt das Denken mit.
+ */
 export function standardSchreiber(): Schreiber {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60000 });
+  return async (nachrichten) => {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-6-luna",
+      reasoning_effort: "low",
+      max_completion_tokens: 4000,
+      messages: nachrichten,
+    });
+    return completion.choices[0]?.message?.content?.trim() ?? "";
+  };
+}
+
+/** Der Schreiber bis 02.10.2026. Bleibt für den Modellvergleich erhalten. */
+export function gpt4oMiniSchreiber(): Schreiber {
   const openai = getOpenAI();
   return async (nachrichten) => {
     const completion = await openai.chat.completions.create({
@@ -1317,6 +1340,31 @@ EMAIL: <email-text>`,
     } else {
       console.log(`Einstieg auch im 2. Versuch eine Floskel für ${firma}`);
       maengel.push("floskel-einstieg");
+    }
+  }
+
+  // Sechste Prüfung, gleiche Bauart: Regie-Satz aus der Struktur-Vorgabe.
+  // Gefunden am 02.10.2026 im Modellvergleich — gpt-6-luna schrieb "Als Antwort
+  // auf die Frage: Hier läuft …", wörtlich aus der Vorgabe "frage-dann-demo".
+  // Die Vorgabe ist umformuliert; die Prüfung bleibt, weil ein Modell, das
+  // Anweisungen wörtlich nimmt, auch eine neue Formulierung wörtlich nehmen kann.
+  const regie = regieSatzImText(ergebnis.inhalt);
+  if (regie) {
+    console.log(`Regie-Satz "${regie}" im Text – Neuversuch für ${firma}`);
+    const nachgefasst = await erzeuge(
+      `In der Mail steht "${regie}". Das ist eine Anweisung an dich, kein Satz für den Empfänger. Gib denselben Betreff und dieselbe Mail erneut aus, aber leite den Link so ein, wie ein Mensch es schreiben würde, ohne zu sagen, dass es eine Antwort ist. Sonst nichts ändern. Wieder im Format BETREFF: / EMAIL:.`
+    );
+    const regieGeloest =
+      regieSatzImText(nachgefasst.inhalt) === null &&
+      nameIstGenannt(nachgefasst.inhalt, firma) &&
+      !oeffnerIstFloskel(nachgefasst.inhalt) &&
+      nachgefasst.inhalt.includes(link);
+    zaehleNachfass(nachfassen, "regie", regieGeloest);
+    if (regieGeloest) {
+      ergebnis = { betreff: ergebnis.betreff, inhalt: nachgefasst.inhalt };
+    } else {
+      console.log(`Regie-Satz auch im 2. Versuch für ${firma}`);
+      maengel.push("regie-satz");
     }
   }
 

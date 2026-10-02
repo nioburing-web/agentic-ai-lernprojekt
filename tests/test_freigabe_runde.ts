@@ -179,5 +179,19 @@ check(gesperrt.has(12), "Zeile mit Regelbruch bleibt gesperrt");
 check(gesperrt.has(13), "repariert UND Befund → bleibt gesperrt");
 check(gesperrteZeilen(new Map()).size === 0, "ohne Befunde ist nichts gesperrt");
 
+// ── Regie-Satz (02.10.2026) ────────────────────────────────────────────────
+// Dieselbe Regel wie im Erzeuger, importiert aus entwurf-qualitaet.ts. Die
+// Freigabe-Runde muss sie sehen, auch für Entwürfe, die vor dem Fix entstanden.
+const mitRegie = regelBefunde(
+  zeile({
+    entwurf:
+      "Hey, wie fangt ihr bei der Kleintierpraxis Berg Anfragen abends ab? Ich bin Nio aus Hamburg.\n\n" +
+      "Als Antwort auf die Frage: Hier läuft ein Assistent. https://demo.nio-automation.de/a/abc123",
+  }),
+  []
+);
+check(mitRegie.some((b) => b.includes("Regie-Satz")), "Regie-Satz 'Als Antwort auf die Frage' wird gemeldet");
+check(regelBefunde(zeile(), []).every((b) => !b.includes("Regie-Satz")), "sauberer Entwurf hat keinen Regie-Befund");
+
 console.log(`\n${bestanden} bestanden, ${fehlgeschlagen} fehlgeschlagen`);
 process.exit(fehlgeschlagen > 0 ? 1 : 0);

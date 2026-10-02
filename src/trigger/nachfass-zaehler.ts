@@ -26,7 +26,7 @@
  * 8 von 53 offenen Zeilen hingen an dieser Regel, die der Erzeuger nicht kannte.
  */
 export type Nachfassgrund =
-  | "betreff" | "kleinschreibung" | "name" | "hook" | "vorlage" | "einstieg";
+  | "betreff" | "kleinschreibung" | "name" | "hook" | "vorlage" | "einstieg" | "regie";
 
 export type Nachfasszaehler = {
   entwuerfe: number;
