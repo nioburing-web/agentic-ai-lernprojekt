@@ -41,3 +41,9 @@ tools/.neue-entwuerfe.json
 
 # Zwischenstaende von tools/modell-vergleich.ts: Lesefassung und Blind-Schluessel.
 tools/.modell-vergleich/
+
+# Zwischenstaende von tools/pruefer-backtest.ts: Modell-Urteile mit Entwurfstexten.
+tools/.pruefer-backtest/
+
+# Freigabe-Vorschlaege und Lesefassungen: enthalten Leaddaten, nie committen.
+tools/.freigabe-runde/
