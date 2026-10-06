@@ -908,8 +908,19 @@ export function adresseIstUnbrauchbar(email: string): string | null {
   // uebrig, war die Sequenz kaputt und die Adresse ist unzustellbar.
   if (adresse.includes("%")) return "Prozentzeichen in der Adresse (kaputte Kodierung)";
 
+  // Scrape-Rest (06.10.2026, Z2098 `ssstik.io_@…`): der Extraktor hat Text vor
+  // dem eigentlichen Postfach mitgenommen. Ein lokaler Teil, der mit Punkt,
+  // Unterstrich oder Bindestrich beginnt oder endet, ist so nie vergeben worden.
+  if (/^[._-]|[._-]$/.test(lokal)) return `Lokaler Teil "${lokal}" beginnt oder endet mit Sonderzeichen (Scrape-Rest)`;
+
   if (FREMD_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`))) {
     return `Fremde Domain (${domain}) — gehoert nicht dem Betrieb`;
+  }
+
+  // Verzeichnis statt Betrieb (06.10.2026, Z2090 `info@tierarzt-onlineverzeichnis.de`).
+  // Die Liste oben kennt nur Namen; Verzeichnisse nennen sich aber selbst so.
+  if (/verzeichnis|branchenbuch/.test(domain)) {
+    return `Verzeichnis-Domain (${domain}) — gehoert nicht dem Betrieb`;
   }
 
   return null;

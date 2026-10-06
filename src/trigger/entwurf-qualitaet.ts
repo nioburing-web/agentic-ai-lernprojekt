@@ -436,3 +436,52 @@ export function regieSatzImText(inhalt: string): string | null {
   }
   return null;
 }
+
+/**
+ * Klingt der Betreff wie eine echte Kundenanfrage? Liefert den Grund, sonst null.
+ *
+ * Warum es das gibt (06.10.2026): In der ersten Luna-Charge standen Betreffe wie
+ * "mein hund kneift ein auge zu" oder "ist die wohnung noch zu haben?". Keine
+ * Regel schlug an, beim Lesen fielen 8 von 59 durch. Der Empfänger öffnet so eine
+ * Mail, weil er einen Kunden erwartet, und merkt nach zwei Sätzen, dass es Werbung
+ * ist. Das kostet Absender-Ruf, nicht nur diese eine Mail.
+ *
+ * Zwei Merkmale, beide am Wortlaut ablesbar:
+ *  1. Ich-Form ("mein", "meine", "ich", "mir"). Wir schreiben nie aus Kundensicht.
+ *  2. Der Betreff ist fast der Demo-Beispielsatz der Nische. Der Satz ist als
+ *     Kundenanfrage formuliert, weil er in die Demo getippt werden soll — als
+ *     Betreff täuscht er. Schwelle: mindestens 3 Wörter und 60 % der Wörter des
+ *     Beispielsatzes. Die freigegebenen Betreffe der Runde lagen bei höchstens
+ *     einem gemeinsamen Wort ("ihr"), die Köder bei 4 von 5 und 5 von 7.
+ *
+ * Normalisiert wird hier lokal statt mit betreffKern() aus nacht-recherche:
+ * nacht-recherche importiert diese Datei, der Rückweg wäre ein Zirkelimport.
+ *
+ * Das Ich-Wort zählt nicht, wenn es im Betriebsnamen steht. Gegen den Bestand
+ * gediffet schlug die Regel sonst bei "Ideen für Meine Fahrschule GmbH" und
+ * "Idee für Mein Makler Berlin-Spandau" an, zwei freigegebenen Betreffen.
+ */
+const ICH_FORM = /(?:^|\s)(ich|mich|mir|mein|meine|meinen|meinem|meiner|meines)(?=\s|$)/;
+
+function koederWoerter(text: string): string[] {
+  return (text ?? "")
+    .toLowerCase()
+    .replace(/[^a-zäöüß0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+}
+
+export function betreffIstKoeder(betreff: string, beispielFrage: string | null, betriebsname = ""): string | null {
+  const kern = (betreff ?? "").toLowerCase().replace(/[^a-zäöüß0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const imNamen = new Set(koederWoerter(betriebsname));
+  const ich = [...kern.matchAll(new RegExp(ICH_FORM.source, "g"))].find((m) => !imNamen.has(m[1] as string));
+  if (ich) return `Ich-Form ("${ich[1]}")`;
+  if (beispielFrage) {
+    const beispiel = new Set(koederWoerter(beispielFrage));
+    const gemeinsam = new Set(koederWoerter(kern).filter((w) => beispiel.has(w)));
+    if (beispiel.size > 0 && gemeinsam.size >= 3 && gemeinsam.size / beispiel.size >= 0.6) {
+      return `fast der Demo-Beispielsatz ("${beispielFrage}")`;
+    }
+  }
+  return null;
+}

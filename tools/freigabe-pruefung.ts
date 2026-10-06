@@ -12,7 +12,7 @@ import {
   vorlageIstAbgeschrieben,
   vorlagenFuer,
 } from "../src/trigger/nacht-recherche";
-import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText } from "../src/trigger/entwurf-qualitaet";
+import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText, betreffIstKoeder } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
 
 export type Befund =
@@ -24,6 +24,40 @@ export type Befund =
 export function hookZurNische(nischenName: string): string | null {
   for (const k of KATEGORIEN) {
     for (const n of k.nischen) if (n.name === nischenName) return n.hook;
+  }
+  return null;
+}
+
+/** Der Demo-Beispielsatz zu einem Nischennamen aus Spalte T. Unbekannt → null. */
+export function beispielZurNische(nischenName: string): string | null {
+  for (const k of KATEGORIEN) {
+    for (const n of k.nischen) if (n.name === nischenName) return n.beispielFrage;
+  }
+  return null;
+}
+
+/**
+ * Sagt der Betriebsname etwas anderes als die Nische, unter der er recherchiert
+ * wurde? Liefert den Grund, sonst null.
+ *
+ * Warum es das gibt (06.10.2026, Z2126): "PAVO Immobilien GmbH | Immobilienmakler
+ * Bochum" kam über die Hausverwaltungs-Suche rein und bekam deshalb den
+ * Hausverwaltungs-Beispielsatz "Bei mir tropft die Heizung". Ein Makler, dem man
+ * das zum Ausprobieren empfiehlt, sieht sofort, dass niemand hingeschaut hat.
+ *
+ * Bewusst nur die Paare, die Maps nachweislich vermischt, und nur wenn das eigene
+ * Stichwort fehlt: "Hausverwaltung & Makler" passt in beide Nischen.
+ */
+const NISCHEN_WIDERSPRUCH: Array<{ nische: string; fremd: RegExp; eigen: RegExp; was: string }> = [
+  { nische: "Hausverwaltung", fremd: /makler/i, eigen: /verwalt/i, was: "Makler" },
+  { nische: "Immobilienmakler-Büro", fremd: /hausverwaltung/i, eigen: /makler/i, was: "Hausverwaltung" },
+];
+
+export function nameWidersprichtNische(name: string, nische: string): string | null {
+  for (const w of NISCHEN_WIDERSPRUCH) {
+    if (w.nische === nische && w.fremd.test(name) && !w.eigen.test(name)) {
+      return `Name klingt nach ${w.was}, Nische ist ${nische}`;
+    }
   }
   return null;
 }
@@ -105,6 +139,11 @@ export function regelBefunde(
   if (!betreffIstBrauchbar(zeile.betreff, verbrauchteBetreffe)) {
     out.push(`Betreff unbrauchbar oder doppelt: "${zeile.betreff}"`);
   }
+  // 06.10.2026: 8 von 59 regelkonformen Betreffen klangen wie Kundenanfragen.
+  const koeder = betreffIstKoeder(zeile.betreff, beispielZurNische(zeile.nische), zeile.name);
+  if (koeder) out.push(`Köder-Betreff, ${koeder}: "${zeile.betreff}"`);
+  const widerspruch = nameWidersprichtNische(zeile.name, zeile.nische);
+  if (widerspruch) out.push(`Name passt nicht zur Nische: ${widerspruch}`);
   return out;
 }
 
