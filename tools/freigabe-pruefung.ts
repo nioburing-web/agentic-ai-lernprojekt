@@ -12,7 +12,7 @@ import {
   vorlageIstAbgeschrieben,
   vorlagenFuer,
 } from "../src/trigger/nacht-recherche";
-import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText, betreffIstKoeder } from "../src/trigger/entwurf-qualitaet";
+import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText, betreffIstKoeder, noShowAufhaenger } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
 
 export type Befund =
@@ -136,6 +136,9 @@ export function regelBefunde(
   // 02.10.2026: Anweisung aus der Struktur-Vorgabe als Text in der Mail.
   const regie = regieSatzImText(zeile.entwurf);
   if (regie) out.push(`Regie-Satz im Text: "${regie}"`);
+  // 08.10.2026: Aufhänger "Termin vergessen", den die Demo nicht einlöst.
+  const noShow = noShowAufhaenger(zeile.entwurf);
+  if (noShow) out.push(`No-Show-Aufhänger, die Demo erinnert nicht: "${noShow}"`);
   if (!betreffIstBrauchbar(zeile.betreff, verbrauchteBetreffe)) {
     out.push(`Betreff unbrauchbar oder doppelt: "${zeile.betreff}"`);
   }

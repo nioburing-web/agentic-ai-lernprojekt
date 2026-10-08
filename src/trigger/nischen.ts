@@ -126,7 +126,7 @@ export const KATEGORIEN: Kategorie[] = [
       {
         name: "Heilpraktiker-Praxis",
         suchbegriffe: ["Heilpraktiker", "Naturheilpraxis"],
-        hook: "Ohne Erinnerung erscheint ein Teil der Patienten nicht zum Termin — jeder Ausfall ist eine Stunde, die niemand bezahlt.",
+        hook: "Neue Patienten haben vor dem ersten Termin viele Fragen zu Ablauf, Dauer und Kosten — und rufen genau dann an, wenn gerade behandelt wird.",
         beispielFrage: "Wie läuft ein Erstgespräch ab?",
       },
       {

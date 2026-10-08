@@ -483,5 +483,39 @@ export function betreffIstKoeder(betreff: string, beispielFrage: string | null, 
       return `fast der Demo-Beispielsatz ("${beispielFrage}")`;
     }
   }
+  // 08.10.2026: "ein tisch für freitagabend", "wann passt die nächste fahrstunde?"
+  // klingen wie eine Buchung, ohne ein Ich-Wort zu tragen. Merkmal: ein
+  // Buchungsgegenstand und ein Zeitpunkt im selben Betreff. Einer allein ist
+  // harmlos ("schnitzel und pasta am freitag", "wie laufen neue termine?").
+  const woerter = koederWoerter(kern).concat(kern.split(" ").filter((w) => w.length <= 2));
+  const gegenstand = woerter.find((w) => BUCHUNG.has(w) || /termine?$/.test(w));
+  const zeitpunkt = woerter.find((w) => ZEITPUNKT.has(w) || WOCHENTAG.test(w));
+  if (gegenstand && zeitpunkt) return `klingt nach Buchung ("${gegenstand}" + "${zeitpunkt}")`;
   return null;
+}
+
+const BUCHUNG = new Set([
+  "tisch", "tische", "termin", "termine", "fahrstunde", "fahrstunden",
+  "platz", "plätze", "zimmer", "reservierung",
+]);
+const ZEITPUNKT = new Set([
+  "heute", "morgen", "wochenende", "nächste", "nächsten", "nächster", "nächstes", "frei", "noch",
+]);
+const WOCHENTAG = /^(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)/;
+
+/**
+ * Baut die Mail ihren Aufhänger auf vergessene Termine? Liefert die Fundstelle, sonst null.
+ *
+ * Warum es das gibt (08.10.2026): 5 von 9 Heilpraktiker-Entwürfen begannen mit
+ * "Wenn jemand einen Termin vergisst, ist die Stunde unbezahlt". Die Demo erinnert
+ * an nichts. Wer den Link anklickt, findet das versprochene Problem nicht gelöst,
+ * und die Mail wirkt wie aus einer Vorlage für ein anderes Produkt. Dasselbe Muster
+ * fiel schon am 22.09. auf (7 von 8 Heilpraktiker-Entwürfen). Ursache war beide
+ * Male der Branchen-Hook in nischen.ts, nicht das Modell.
+ */
+const NO_SHOW = /\b(vergisst|vergessen|vergessene[nmrs]?)\b|erinnerung fehlt|ohne erinnerung|nicht zum termin|no-?show|\bunbezahlt\b|(stunde|zeit)[^.]{0,30}nicht bezahlt|nicht bezahlt[^.]{0,10}(stunde|zeit)/i;
+
+export function noShowAufhaenger(inhalt: string): string | null {
+  const treffer = (inhalt ?? "").match(NO_SHOW);
+  return treffer ? treffer[0] : null;
 }
