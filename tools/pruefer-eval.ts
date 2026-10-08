@@ -21,6 +21,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { nioUrteil } from "./pruefer-backtest";
+import { regelBefunde } from "./freigabe-pruefung";
 import { regelTreffer, grammatikBefunde, fitUrteil, istKeineKorrektur, PROMPT_VERSION, type PruefFall } from "./pruefer";
 
 const arg = (name: string, standard: string): string =>
@@ -132,7 +133,10 @@ async function main(): Promise<void> {
   const PARALLEL = 6;
   for (let i = 0; i < faelle.length; i += PARALLEL) {
     await Promise.all(faelle.slice(i, i + PARALLEL).map(async (f) => {
-      const regeln = regelTreffer(f);
+      // 08.10.2026: dazu die Regeln der Freigabe-Runde, importiert statt nachgebaut.
+      // Ohne sie liess der Prüfer 7 Zeilen frei, die die Runde selbst gesperrt hätte
+      // (Köder-Betreff, Firmenname fehlt) — gemessen wurde ein Teil-Prüfer.
+      const regeln = [...regelTreffer(f), ...regelBefunde(f, [])];
       let grammatik: string[] = [];
       let fit: string | null = null;
       if (NUR_CACHE) {
