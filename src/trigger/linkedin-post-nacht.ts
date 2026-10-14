@@ -306,10 +306,10 @@ async function sendeStatusReport(
 
 export const linkedinPostNacht = schedules.task({
   id: "linkedin-post-nacht",
-  cron: {
-    pattern: "0 21 * * 1-4", // 21:00 CET Mo–Do → generiert für Di–Fr
-    timezone: "Europe/Berlin",
-  },
+  // Cron abgeschaltet 14.10.2026 (Nio): 14 von 14 Drafts unbrauchbar, die
+  // meisten mit erfundener Fallstudie und Zahl. Kostet jede Nacht ein Kie-Bild
+  // und liefert nichts, was /linkedin-post verwenden darf. War:
+  // { pattern: "0 21 * * 1-4", timezone: "Europe/Berlin" }
   machine: "small-2x",
   maxDuration: 300,
   run: async () => {

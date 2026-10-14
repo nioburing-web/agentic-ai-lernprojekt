@@ -179,10 +179,10 @@ async function sendeStatusReport(
 
 export const linkedinApiPosting = schedules.task({
   id: "linkedin-api-posting",
-  cron: {
-    pattern: "0 8 * * 2-6", // 08:00 Europe/Berlin, Di–Sa (Content vom Vortag)
-    timezone: "Europe/Berlin",
-  },
+  // Cron abgeschaltet 14.10.2026 (Nio): postet den READY-Draft der Nacht ohne
+  // Review, sobald ein Token gesetzt ist. Die Nacht-Drafts erfinden Kunden
+  // und Zahlen, also darf dieser Weg nie scharf werden. War:
+  // { pattern: "0 8 * * 2-6", timezone: "Europe/Berlin" }
   machine: "small-1x",
   maxDuration: 120,
   run: async () => {
