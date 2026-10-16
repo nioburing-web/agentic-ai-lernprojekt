@@ -494,6 +494,25 @@ export function betreffIstKoeder(betreff: string, beispielFrage: string | null, 
   return null;
 }
 
+/**
+ * Ist der Betreff keine Frage? Liefert den Grund, sonst null.
+ *
+ * Warum es das gibt (16.10.2026): seit dem 11.10. fielen beim Lesen 42 von 46
+ * Betreffen ohne Fragezeichen durch. "osteopathie in mannheim" oder "hautanalyse
+ * in augsburg" lesen sich wie ein Suchbegriff oder der Anfang einer
+ * Kundenanfrage, "physiotherapie am neckar" wie ein Slogan. Von 14 Betreffen,
+ * die als Frage an den Betrieb formuliert waren, fiel keiner an seiner Form.
+ * Nio hat am 16.10. entschieden: der Betreff ist immer eine Frage.
+ *
+ * Bewusst nur das Fragezeichen. "Leistung in Ort" an Ortsnamen zu erkennen
+ * hiesse, eine Liste deutscher Orte und Leistungen zu pflegen. Das Fragezeichen
+ * trennt die beiden Gruppen im Bestand genauso, ohne Liste. Ob die Frage an
+ * den Betrieb geht und nicht aus Kundensicht kommt, prüft betreffIstKoeder().
+ */
+export function betreffIstKeineFrage(betreff: string): string | null {
+  return /\?\s*$/.test(betreff ?? "") ? null : "kein Fragezeichen am Ende";
+}
+
 const BUCHUNG = new Set([
   "tisch", "tische", "termin", "termine", "fahrstunde", "fahrstunden",
   "platz", "plätze", "zimmer", "reservierung",

@@ -24,9 +24,12 @@
  * "kleinschreibung" kam am 10.09.2026 dazu: der Prompt verlangt einen klein
  * geschriebenen Betreff, geprueft wurde das bis dahin nur in der Freigabe-Runde.
  * 8 von 53 offenen Zeilen hingen an dieser Regel, die der Erzeuger nicht kannte.
+ *
+ * "frage" kam am 16.10.2026 dazu: der Betreff muss eine Frage an den Betrieb
+ * sein. Seit dem 11.10. fielen 42 von 46 Betreffen ohne Fragezeichen beim Lesen.
  */
 export type Nachfassgrund =
-  | "betreff" | "kleinschreibung" | "name" | "hook" | "vorlage" | "einstieg" | "regie";
+  | "betreff" | "kleinschreibung" | "frage" | "name" | "hook" | "vorlage" | "einstieg" | "regie";
 
 export type Nachfasszaehler = {
   entwuerfe: number;

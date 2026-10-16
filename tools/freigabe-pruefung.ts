@@ -12,7 +12,7 @@ import {
   vorlageIstAbgeschrieben,
   vorlagenFuer,
 } from "../src/trigger/nacht-recherche";
-import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText, betreffIstKoeder, noShowAufhaenger } from "../src/trigger/entwurf-qualitaet";
+import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText, betreffIstKoeder, betreffIstKeineFrage, noShowAufhaenger } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
 
 export type Befund =
@@ -145,6 +145,9 @@ export function regelBefunde(
   // 06.10.2026: 8 von 59 regelkonformen Betreffen klangen wie Kundenanfragen.
   const koeder = betreffIstKoeder(zeile.betreff, beispielZurNische(zeile.nische), zeile.name);
   if (koeder) out.push(`Köder-Betreff, ${koeder}: "${zeile.betreff}"`);
+  // 16.10.2026: Betreffe ohne Frage lesen sich wie Suchbegriff oder Slogan.
+  const keineFrage = betreffIstKeineFrage(zeile.betreff);
+  if (keineFrage) out.push(`Betreff ist keine Frage an den Betrieb (${keineFrage}): "${zeile.betreff}"`);
   const widerspruch = nameWidersprichtNische(zeile.name, zeile.nische);
   if (widerspruch) out.push(`Name passt nicht zur Nische: ${widerspruch}`);
   return out;

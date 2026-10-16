@@ -4,7 +4,7 @@ import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
 import {
   nameFuerMail, oeffnerIstFloskel, nameIstBrauchbar,
   betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
-  regieSatzImText,
+  betreffIstKeineFrage, regieSatzImText,
 } from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
 import {
@@ -575,26 +575,34 @@ export function mailAngles(
 // Deshalb: kein Zufall wie bei mailAngles(), sondern harte Rotation über den
 // Lauf-Index. Bei 30 Mails pro Nacht kommt so jeder Blickwinkel ~6x vor statt
 // einer Kategorie 19x.
+//
+// Seit dem 16.10.2026 ist jeder Blickwinkel eine Frage an den Betrieb. Vorher
+// verlangten vier von fünf genau die Form, die beim Lesen fiel: "benennt diese
+// Leistung" ergab "osteopathie in mannheim", "an seinem Ort" ergab "physiotherapie
+// am neckar", "aus Sicht eines Kunden" ergab Köder wie "habt ihr samstag noch
+// einen termin?". Seit dem 11.10. fielen 42 von 46 Betreffen ohne Frage, keiner
+// von 14 Frage-Betreffen an seiner Form. Die Rotation bleibt: fünf verschiedene
+// Fragen statt einer, sonst steht in 30 Betreffen 30-mal "wer nimmt ... auf?".
 const BETREFF_ANGLES: { name: string; anweisung: string }[] = [
   {
-    name: "leistung",
-    anweisung: "Nimm EINE konkrete Leistung oder einen Schwerpunkt, der wörtlich im Website-Auszug steht (z.B. Klimaservice, Getriebeinstandsetzung, Oldtimer). Der Betreff benennt diese Leistung.",
+    name: "zustaendigkeit",
+    anweisung: "Formuliere den Betreff als kurze, echte Frage an den Betrieb, wer sich bei ihnen um neue Anfragen kümmert (z.B. \"wer nimmt neue terminfragen auf?\"). Nimm dafür das Wort, das zu DIESEM Betrieb passt: Mandanten, Patienten, Mieter, Tischreservierungen, Fahrschüler.",
   },
   {
-    name: "echte-frage",
-    anweisung: "Formuliere den Betreff als kurze, echte Frage zum Arbeitsalltag dieses Betriebs — aber OHNE das Wort Anruf oder Telefon. Etwas, das ein Kollege fragen würde.",
+    name: "ablauf",
+    anweisung: "Formuliere den Betreff als kurze, echte Frage zum Arbeitsalltag dieses Betriebs, etwas, das ein Kollege fragen würde (z.B. \"wie plant ihr neue termine?\"). OHNE das Wort Anruf oder Telefon.",
   },
   {
-    name: "spezialisierung",
-    anweisung: "Nimm eine Spezialisierung, ein Verfahren oder ein besonderes Angebot aus dem Website-Auszug und bau den Betreff darum.",
+    name: "leistung-als-frage",
+    anweisung: "Nimm EINE konkrete Leistung, die wörtlich im Website-Auszug steht, und stell dazu eine kurze Frage an den Betrieb, wie Anfragen dazu bei ihnen ankommen (z.B. \"wie kommen balayage-anfragen rein?\"). Der Betreff ist eine Frage an den Betrieb, NICHT die Leistung mit Ortsnamen.",
   },
   {
-    name: "ort-betrieb",
-    anweisung: "Nimm etwas, das diesen Betrieb an seinem Ort auszeichnet — Stadtteil, Familienbetrieb, Jahreszahl, Bewertung — und bau den Betreff darum.",
+    name: "nach-feierabend",
+    anweisung: "Formuliere den Betreff als kurze, echte Frage an den Betrieb, was mit Anfragen passiert, während sie gerade arbeiten oder nach Feierabend (z.B. \"was passiert nach büroschluss?\"). OHNE das Wort Anruf oder Telefon.",
   },
   {
-    name: "kundensicht",
-    anweisung: "Schreib den Betreff aus Sicht eines KUNDEN dieses Betriebs, als wäre es der Anfang einer echten Kundenanfrage. Kein Wort über Anrufe.",
+    name: "erste-kundenfrage",
+    anweisung: "Formuliere den Betreff als kurze, echte Frage an den Betrieb, was neue Kunden sie zuerst fragen (z.B. \"was fragen kaufinteressenten zuerst?\"). Die Frage richtet sich an den Betrieb, sie ist NICHT aus Sicht eines Kunden geschrieben und enthält kein ich, mein oder mir.",
   },
 ];
 
@@ -1258,6 +1266,28 @@ EMAIL: <email-text>`,
     } else {
       console.log(`Betreff auch im 2. Versuch großgeschrieben ("${ergebnis.betreff}") für ${firma}`);
       maengel.push("betreff grossgeschrieben");
+    }
+  }
+
+  // Der Betreff ist eine Frage an den Betrieb, siehe betreffIstKeineFrage().
+  // Seit dem 16.10.2026 verlangt jeder Blickwinkel das, und wie bei der
+  // Kleinschreibung wird es geprüft statt erhofft: einmal nachfassen, nur den
+  // Betreff übernehmen, und nur wenn er alle Betreff-Regeln hält.
+  if (betreffIstKeineFrage(ergebnis.betreff)) {
+    console.log(`Betreff ist keine Frage ("${ergebnis.betreff}") – Neuversuch für ${firma}`);
+    const nachgefasst = await erzeuge(
+      `Der Betreff "${ergebnis.betreff}" ist keine Frage. Er liest sich wie ein Suchbegriff oder ein Slogan. Gib dieselbe Mail unverändert erneut aus, nur mit einem Betreff, der eine kurze, echte Frage an den Betrieb ist, mit Fragezeichen am Ende, klein geschrieben, nach diesem Blickwinkel: ${betreffAngle.anweisung} Wieder im Format BETREFF: / EMAIL:.`
+    );
+    const frageGeloest =
+      !betreffIstKeineFrage(nachgefasst.betreff) &&
+      !betreffBrichtKleinschreibung(nachgefasst.betreff) &&
+      betreffIstBrauchbar(nachgefasst.betreff, verbrauchteBetreffe);
+    zaehleNachfass(nachfassen, "frage", frageGeloest);
+    if (frageGeloest) {
+      ergebnis = { betreff: nachgefasst.betreff, inhalt: ergebnis.inhalt };
+    } else {
+      console.log(`Betreff auch im 2. Versuch keine Frage ("${ergebnis.betreff}") für ${firma}`);
+      maengel.push("betreff keine frage");
     }
   }
 
