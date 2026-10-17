@@ -42,12 +42,26 @@ type QueueRow = {
   betreff: string;
 };
 
+/**
+ * Wie viele Zeilen dieses Typs noch auf PRUEFEN warten. Geht in die Ausgabe,
+ * damit der Health-Monitor eine Freigabe-Pause von einem echten Leerlauf
+ * unterscheiden kann (Audit AIOS-20261017-01). Spalte A = Typ, F = Status.
+ */
+export function zaehleWartend(rows: unknown[][], typ: "EMAIL" | "LINKEDIN"): number {
+  let n = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row && row[0] === typ && row[5] === "PRUEFEN") n++;
+  }
+  return n;
+}
+
 async function ladeDraftRows(
   sheets: ReturnType<typeof googleSheets>,
   sheetId: string,
   typ: "EMAIL" | "LINKEDIN",
   limit: number
-): Promise<QueueRow[]> {
+): Promise<{ rows: QueueRow[]; wartend: number }> {
   const response = await mitWiederholung("Entwuerfe aus der Queue laden", () =>
     sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
@@ -74,7 +88,7 @@ async function ladeDraftRows(
     });
   }
 
-  return result;
+  return { rows: result, wartend: zaehleWartend(rows, typ) };
 }
 
 async function aktualisiereStatus(
@@ -222,7 +236,7 @@ export const morgenVersand = schedules.task({
 
     // ── Phase 1: E-Mails ──────────────────────────────────────────────────────
     console.log("Phase 1: E-Mails senden...");
-    const emailRows = await ladeDraftRows(sheets, sheetId, "EMAIL", 30);
+    const { rows: emailRows, wartend: wartetAufFreigabe } = await ladeDraftRows(sheets, sheetId, "EMAIL", 30);
     console.log(`${emailRows.length} E-Mail-Drafts gefunden`);
 
     let emailGesendet = 0;
@@ -266,6 +280,6 @@ export const morgenVersand = schedules.task({
     // Das Ergebnis verlaesst den Lauf, statt nur im Log zu stehen. Der
     // agent-health-monitor liest es und schlaegt Alarm, wenn ein gruener Lauf
     // nichts bewirkt hat (25.08.2026: 0 von 0 gesendet, kein Alarm, kein Outreach).
-    return { gefunden: emailRows.length, gesendet: emailGesendet, fehler: fehler.length };
+    return { gefunden: emailRows.length, gesendet: emailGesendet, fehler: fehler.length, wartetAufFreigabe };
   },
 });

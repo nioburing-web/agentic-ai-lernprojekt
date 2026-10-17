@@ -14,8 +14,9 @@
 // `nacht-recherche` schreibt sogar "WARNUNG: 0 Entwürfe" — aber `run()` gab
 // `undefined` zurück, also verliess das Wissen den Lauf nie.
 
-import { leerlaufBefund, baueAlarm } from "../src/trigger/agent-health-monitor";
+import { leerlaufBefund, leerlaufArt, baueAlarm, pruefFenster, imFenster } from "../src/trigger/agent-health-monitor";
 import type { FehlerRun, LeerlaufRun } from "../src/trigger/agent-health-monitor";
+import { zaehleWartend } from "../src/trigger/morgen-versand";
 
 let bestanden = 0;
 let fehlgeschlagen = 0;
@@ -127,6 +128,62 @@ check(
 const nurFehler = baueAlarm(beispielFehler, [], 65);
 check(nurFehler.betreff.includes("1 Task down") && !nurFehler.betreff.includes("Leerlauf"),
   `Betreff ohne Leerlauf-Teil: "${nurFehler.betreff}"`);
+
+// ─── Freigabe-Pause ist kein Leerlauf (Audit AIOS-20261017-01) ───────────────
+// 28.09.–16.10.2026: acht Alarm-Mails "⚠️ Agent-Alarm: 1x Leerlauf", alle acht
+// waren Tage, an denen die Entwuerfe noch auf PRUEFEN lagen. Ein echter Ausfall
+// (Pool leer, Sheets kaputt) sah im Postfach genauso aus. Nios Entscheidung
+// 17.10.: weiter melden, aber unter eigenem Namen.
+console.log("\n=== morgen-versand: Freigabe-Pause vs. echter Leerlauf ===");
+check(leerlaufArt("morgen-versand", { gefunden: 0, gesendet: 0, fehler: 0, wartetAufFreigabe: 42 }) === "freigabe",
+  "0 DRAFT, 42 PRUEFEN → Art freigabe");
+check(leerlaufArt("morgen-versand", { gefunden: 0, gesendet: 0, fehler: 0, wartetAufFreigabe: 0 }) === "leerlauf",
+  "0 DRAFT, 0 PRUEFEN → Art leerlauf (echter Ausfall)");
+check(leerlaufArt("morgen-versand", { gefunden: 0, gesendet: 0, fehler: 0 }) === "leerlauf",
+  "alte Ausgabe ohne wartetAufFreigabe → leerlauf (fail-closed)");
+check(leerlaufArt("morgen-versand", { gefunden: 5, gesendet: 0, fehler: 5, wartetAufFreigabe: 9 }) === "leerlauf",
+  "5 gefunden, 0 gesendet bleibt Leerlauf, auch wenn PRUEFEN wartet");
+const pauseBefund = leerlaufBefund("morgen-versand", { gefunden: 0, gesendet: 0, fehler: 0, wartetAufFreigabe: 42 }) ?? "";
+check(pauseBefund.includes("42") && /freigabe/i.test(pauseBefund), `Befund nennt Zahl und Freigabe: "${pauseBefund}"`);
+
+const pause: LeerlaufRun = { taskId: "morgen-versand", runId: "run_p", zeit: "16.10.2026, 09:02", befund: pauseBefund, art: "freigabe" };
+const nurPause = baueAlarm([], [pause], 60);
+check(nurPause.betreff.startsWith("📝 Freigabe fällig") && !nurPause.betreff.includes("Agent-Alarm"),
+  `reine Pause: eigener Betreff — "${nurPause.betreff}"`);
+const echt: LeerlaufRun = { taskId: "morgen-versand", runId: "run_e", zeit: "16.10.2026, 09:02", befund: "0 DRAFT, 0 PRUEFEN", art: "leerlauf" };
+const gemischt = baueAlarm([], [pause, echt], 60);
+check(gemischt.betreff.startsWith("⚠️ Agent-Alarm"), `Pause + echter Leerlauf: Alarm gewinnt — "${gemischt.betreff}"`);
+const mitFehler = baueAlarm(beispielFehler, [pause], 60);
+check(mitFehler.betreff.startsWith("⚠️ Agent-Alarm") && mitFehler.betreff.includes("Task down"),
+  `Fehler + Pause: Alarm gewinnt — "${mitFehler.betreff}"`);
+
+// Die andere Haelfte: morgen-versand muss die Zahl auch liefern. Spalte A = Typ, F = Status.
+console.log("\n=== morgen-versand zählt, was auf Freigabe wartet ===");
+const queue: unknown[][] = [
+  ["Typ", "Name", "Stadt", "Kontakt", "Entwurf", "Status"],
+  ["EMAIL", "a", "", "", "", "PRUEFEN"],
+  ["EMAIL", "b", "", "", "", "DRAFT"],
+  ["LINKEDIN", "c", "", "", "", "PRUEFEN"],
+  ["EMAIL", "d", "", "", "", "PRUEFEN"],
+  ["EMAIL", "e", "", "", "", "GESENDET"],
+  [],
+];
+check(zaehleWartend(queue, "EMAIL") === 2, "2 EMAIL auf PRUEFEN, LinkedIn und Kopfzeile zählen nicht");
+check(zaehleWartend([["Typ"]], "EMAIL") === 0, "leere Queue → 0");
+
+// ─── Jeder Lauf genau einmal (Doppelmeldungen 15.10., 06.10., 30.09.) ────────
+// Das Fenster war "65 Minuten ab jetzt": ein Lauf, der vor dem naechsten
+// Monitor-Lauf fertig war, lag in zwei Fenstern und kam zweimal per Mail.
+console.log("\n=== Fenster: jeder Lauf genau einmal ===");
+const t = (s: string) => new Date(s);
+const f1 = pruefFenster({ timestamp: t("2026-10-15T07:00:00Z"), lastTimestamp: t("2026-10-15T06:00:00Z") });
+const f2 = pruefFenster({ timestamp: t("2026-10-15T08:00:00Z"), lastTimestamp: t("2026-10-15T07:00:00Z") });
+const fertig = t("2026-10-15T07:00:49Z"); // morgen-versand 15.10.
+check([f1, f2].filter((f) => imFenster(fertig, f)).length === 1, "Lauf von 07:00:49 liegt in genau einem Fenster");
+check(imFenster(t("2026-10-15T07:00:00Z"), f2) && !imFenster(t("2026-10-15T07:00:00Z"), f1), "Grenze: Start inklusiv, Ende exklusiv");
+check(!imFenster(null, f2), "ohne finishedAt kein Treffer");
+const ohneLast = pruefFenster({ timestamp: t("2026-10-15T08:00:00Z") });
+check(ohneLast.bis.getTime() - ohneLast.von.getTime() === 60 * 60_000, "erster Lauf ohne lastTimestamp: eine Stunde zurück");
 
 console.log("\n--- So sieht die Mail bei reinem Leerlauf aus ---");
 console.log(`Betreff: ${nurLeerlauf.betreff}`);

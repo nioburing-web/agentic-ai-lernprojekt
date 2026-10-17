@@ -24,16 +24,13 @@ const FEHLER_STATUS = ["FAILED", "CRASHED", "SYSTEM_FAILURE", "TIMED_OUT"] as co
 // Eigene Task-ID — nie über sich selbst alarmieren
 const EIGENE_TASK_ID = "agent-health-monitor";
 
-// Lookback etwas größer als das Cron-Intervall (1h), damit kein Failure durchrutscht.
-// Über den Payload überschreibbar (z.B. für manuelle Tests gegen historische Failures).
-const LOOKBACK_MIN_DEFAULT = 65;
-
 // Frueher stand hier `type MonitorPayload = { lookbackMin?: number } | undefined`
 // und run() nahm sie entgegen. Das war Wunschdenken: `schedules.task` uebergibt
 // immer den Zeitplan-Payload, nie ein eigenes Objekt — `payload?.lookbackMin`
-// war seit dem ersten Tag garantiert undefined und der Default hat immer
-// gegriffen. Aufgefallen beim ersten Typecheck-Lauf (28.08.2026). Das Fenster
-// ist damit eine Konstante, und jetzt steht das auch so da.
+// war seit dem ersten Tag garantiert undefined (Typecheck 28.08.2026).
+// Danach war das Fenster eine Konstante von 65 Minuten ab "jetzt" und ueberlappte
+// sich mit dem naechsten Lauf (Doppelmails). Seit 17.10.2026 kommt es aus genau
+// diesem Zeitplan-Payload: lastTimestamp bis timestamp, siehe pruefFenster().
 
 // Was runs.retrieve() im error-Feld liefert (@trigger.dev/core 4.4.4).
 // runs.list() liefert dieses Feld NICHT — siehe fehlertextAus().
@@ -135,7 +132,11 @@ export function leerlaufBefund(taskId: string, ausgabe: unknown): string | null 
       return "Lauf meldet kein verwertbares Ergebnis (gefunden/gesendet fehlen) — laeuft hier noch eine alte Version?";
     }
     if (gefunden === 0) {
-      return "0 freigegebene Entwuerfe in der Queue — es ging keine einzige Mail raus. Queue auf DRAFT pruefen.";
+      const wartet = zahl(ausgabe, "wartetAufFreigabe");
+      if (wartet !== null && wartet > 0) {
+        return `0 freigegebene Entwuerfe, aber ${wartet} warten auf PRUEFEN — Freigabe-Runde faellig, kein Ausfall.`;
+      }
+      return "0 freigegebene Entwuerfe und nichts auf PRUEFEN — es ging keine Mail raus und es kommt keine nach. Nacht-Recherche und Queue pruefen.";
     }
     if (gesendet === 0) {
       return `${gefunden} Entwuerfe gefunden, aber 0 gesendet — jeder Sendeversuch ist gescheitert (Brevo?).`;
@@ -165,12 +166,50 @@ export function leerlaufBefund(taskId: string, ausgabe: unknown): string | null 
   return null;
 }
 
+/**
+ * Unterscheidet die Freigabe-Pause vom echten Leerlauf (Audit AIOS-20261017-01).
+ * 28.09.–16.10.2026 kamen acht "Leerlauf"-Alarme, alle acht waren Tage, an denen
+ * die Entwuerfe noch auf PRUEFEN lagen. Ein echter Ausfall sah im Postfach genauso
+ * aus. "freigabe" nur, wenn morgen-versand 0 gefunden hat UND selbst meldet, dass
+ * Entwuerfe warten — fehlt das Feld (alte Version), bleibt es Leerlauf.
+ */
+export function leerlaufArt(taskId: string, ausgabe: unknown): "freigabe" | "leerlauf" {
+  if (taskId !== "morgen-versand") return "leerlauf";
+  const wartet = zahl(ausgabe, "wartetAufFreigabe");
+  return zahl(ausgabe, "gefunden") === 0 && wartet !== null && wartet > 0 ? "freigabe" : "leerlauf";
+}
+
 export type LeerlaufRun = {
   taskId: string;
   runId: string;
   zeit: string;
   befund: string;
+  art?: "freigabe" | "leerlauf";
 };
+
+/**
+ * Pruef-Fenster eines Monitor-Laufs: von der letzten bis zur aktuellen
+ * Planzeit. Vorher hiess es "65 Minuten ab jetzt", und ein Lauf, der vor dem
+ * naechsten Monitor-Lauf fertig war, lag in zwei Fenstern — Doppelmails am
+ * 30.09., 06.10. und 15.10. Mit aneinanderstossenden Fenstern faellt jedes
+ * Lauf-Ende in genau eines.
+ */
+export function pruefFenster(p: { timestamp: Date; lastTimestamp?: Date }): { von: Date; bis: Date } {
+  const bis = new Date(p.timestamp);
+  const von = p.lastTimestamp ? new Date(p.lastTimestamp) : new Date(bis.getTime() - 60 * 60_000);
+  return { von, bis };
+}
+
+export function imFenster(fertig: Date | null | undefined, f: { von: Date; bis: Date }): boolean {
+  if (!fertig) return false;
+  const t = new Date(fertig).getTime();
+  return t >= f.von.getTime() && t < f.bis.getTime();
+}
+
+// runs.list filtert nach Startzeit, das Fenster nach Endzeit. Ein langer Lauf
+// (nacht-recherche bis 11 Min., maxDuration bis 10 Min.) startet vor dem
+// Fenster und endet darin — deshalb so weit zurueck listen.
+const LISTE_VORLAUF_MIN = 120;
 
 export type FehlerRun = {
   taskId: string;
@@ -182,8 +221,8 @@ export type FehlerRun = {
 
 // ─── Schritt 1: Fehlgeschlagene Runs sammeln ──────────────────────────────────
 
-async function sammleFehler(lookbackMin: number): Promise<FehlerRun[]> {
-  const seit = new Date(Date.now() - lookbackMin * 60_000);
+async function sammleFehler(fenster: { von: Date; bis: Date }): Promise<FehlerRun[]> {
+  const seit = new Date(fenster.von.getTime() - LISTE_VORLAUF_MIN * 60_000);
   const treffer: FehlerRun[] = [];
 
   for await (const run of runs.list({
@@ -192,6 +231,7 @@ async function sammleFehler(lookbackMin: number): Promise<FehlerRun[]> {
     limit: 50,
   })) {
     if (run.taskIdentifier === EIGENE_TASK_ID) continue; // Selbstreferenz ausschließen
+    if (!imFenster(run.finishedAt ?? run.updatedAt, fenster)) continue; // schon gemeldet oder naechstes Fenster
 
     const zeit = (run.finishedAt ?? run.createdAt ?? new Date()).toLocaleString("de-DE", {
       timeZone: "Europe/Berlin",
@@ -224,12 +264,13 @@ async function sammleFehler(lookbackMin: number): Promise<FehlerRun[]> {
 
 // ─── Schritt 1b: Leerlauf sammeln ─────────────────────────────────────────────
 
-async function sammleLeerlauf(lookbackMin: number): Promise<LeerlaufRun[]> {
-  const seit = new Date(Date.now() - lookbackMin * 60_000);
+async function sammleLeerlauf(fenster: { von: Date; bis: Date }): Promise<LeerlaufRun[]> {
+  const seit = new Date(fenster.von.getTime() - LISTE_VORLAUF_MIN * 60_000);
   const treffer: LeerlaufRun[] = [];
 
   for await (const run of runs.list({ status: ["COMPLETED"], from: seit, limit: 50 })) {
     if (!(UEBERWACHTE_TASKS as readonly string[]).includes(run.taskIdentifier)) continue;
+    if (!imFenster(run.finishedAt, fenster)) continue; // schon gemeldet oder naechstes Fenster
 
     let ausgabe: unknown;
     try {
@@ -255,6 +296,7 @@ async function sammleLeerlauf(lookbackMin: number): Promise<LeerlaufRun[]> {
         timeZone: "Europe/Berlin",
       }),
       befund,
+      art: leerlaufArt(run.taskIdentifier, ausgabe),
     });
   }
 
@@ -274,9 +316,28 @@ export function baueAlarm(
 ): { betreff: string; text: string } {
   // Der Betreff muss allein schon sagen, was los ist — die Mail wird sonst
   // aufgeschoben. Belegt: drei Alarm-Mails in vierzehn Tagen blieben ungelesen.
+  // Reine Freigabe-Pause bekommt einen eigenen Betreff: Nio soll am Postfach
+  // sehen, ob er handeln muss oder ob etwas kaputt ist. Sobald ein Fehler oder
+  // ein echter Leerlauf dabei ist, gewinnt der Alarm.
+  const pausen = leerlauf.filter((l) => l.art === "freigabe");
+  const echterLeerlauf = leerlauf.filter((l) => l.art !== "freigabe");
+  if (fehler.length === 0 && echterLeerlauf.length === 0 && pausen.length > 0) {
+    const bloecke = pausen
+      .map((l) => `▸ ${l.taskId}\n  Zeit:  ${l.zeit}\n  Run:   ${l.runId}\n  Stand: ${l.befund}`)
+      .join("\n\n");
+    return {
+      betreff: "📝 Freigabe fällig: Versand pausiert, Entwürfe warten auf PRUEFEN",
+      text:
+        `=== FREIGABE FAELLIG ===\n\n` +
+        `Kein Ausfall. Der Versand ist gelaufen, aber nichts war freigegeben:\n\n${bloecke}\n\n` +
+        `Naechster Schritt: Freigabe-Runde (tools/freigabe-runde.ts), dann geht es am naechsten Versandtag raus.`,
+    };
+  }
+
   const teile: string[] = [];
   if (fehler.length > 0) teile.push(`${fehler.length} Task${fehler.length === 1 ? "" : "s"} down`);
-  if (leerlauf.length > 0) teile.push(`${leerlauf.length}x Leerlauf`);
+  if (echterLeerlauf.length > 0) teile.push(`${echterLeerlauf.length}x Leerlauf`);
+  if (pausen.length > 0) teile.push(`${pausen.length}x Freigabe fällig`);
   const betreff = `⚠️ Agent-Alarm: ${teile.join(", ")}`;
 
   const abschnitte: string[] = [];
@@ -356,12 +417,16 @@ export const agentHealthMonitor = schedules.task({
     timezone: "Europe/Berlin",
   },
   maxDuration: 60,
-  run: async () => {
-    const lookbackMin = LOOKBACK_MIN_DEFAULT;
-    logger.log("Agent-Health-Monitor gestartet", { lookbackMin });
+  run: async (payload) => {
+    const fenster = pruefFenster(payload);
+    const lookbackMin = Math.round((fenster.bis.getTime() - fenster.von.getTime()) / 60_000);
+    logger.log("Agent-Health-Monitor gestartet", {
+      von: fenster.von.toISOString(),
+      bis: fenster.bis.toISOString(),
+    });
 
-    const fehler = await sammleFehler(lookbackMin);
-    const leerlauf = await sammleLeerlauf(lookbackMin);
+    const fehler = await sammleFehler(fenster);
+    const leerlauf = await sammleLeerlauf(fenster);
 
     // Decision Point: nichts gefunden → still bleiben, kein Lärm
     if (fehler.length === 0 && leerlauf.length === 0) {
