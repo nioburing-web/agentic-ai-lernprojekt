@@ -45,7 +45,8 @@ const VORUEBERGEHENDE_TEXTE = [
   "timeout",
 ];
 
-function statusVon(fehler: unknown): number | null {
+/** Exportiert für ki-client.ts — eine Status-Erkennung, nicht zwei. */
+export function statusVon(fehler: unknown): number | null {
   if (typeof fehler !== "object" || fehler === null) return null;
   const f = fehler as { code?: unknown; status?: unknown; response?: { status?: unknown } };
   for (const wert of [f.code, f.status, f.response?.status]) {
