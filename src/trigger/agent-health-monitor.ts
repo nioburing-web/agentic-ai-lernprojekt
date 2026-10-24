@@ -13,7 +13,7 @@
 // KPI: Less cost (Nios Zeit). Metrik: Time-to-Detection von Stunden → Minuten.
 // Autonomie: L2 — meldet + ordnet ein, der Fix bleibt bei Nio.
 
-import { schedules, runs, logger } from "@trigger.dev/sdk";
+import { schedules, runs, logger, tags } from "@trigger.dev/sdk";
 import axios from "axios";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ export function fehlertextAus(error: RunFehlerDetail): string {
 // Ein Waechter, der an ruhigen Tagen schreit, wird genauso ignoriert wie einer,
 // der schweigt.
 
-const UEBERWACHTE_TASKS = ["morgen-versand", "nacht-recherche"] as const;
+export const UEBERWACHTE_TASKS = ["morgen-versand", "nacht-recherche"] as const;
 
 function zahl(ausgabe: unknown, feld: string): number | null {
   if (typeof ausgabe !== "object" || ausgabe === null) return null;
@@ -382,6 +382,114 @@ export function baueAlarm(
   return { betreff, text };
 }
 
+// ─── Schritt 2b: Ausweichroute (OpenRouter) ───────────────────────────────────
+//
+// Seit 24.10.2026 schalten die vier KI-Agenten bei einem OpenAI-Ausfall auf
+// OpenRouter um (src/trigger/ki-client.ts) und legen das in `ausweichroute` ihrer
+// Lauf-Ausgabe ab. Still darf das nicht passieren: sonst ist OpenAI tagelang tot,
+// bis auch das OpenRouter-Guthaben leer ist und beide Wege gleichzeitig fallen.
+// Nio will sofort eine Mail und danach eine Erinnerung pro Tag. Den Meldezustand
+// trägt ein Tag an den eigenen Läufen — keine neue Abhängigkeit, kein Speicher.
+
+export const AUSWEICH_TASKS = ["nacht-recherche", "reply-classifier", "nachfass-versand", "sofort-antwort"] as const;
+export const AUSWEICH_TAG = "ausweichroute-gemeldet";
+// 20 statt 24 Stunden: ein Nachtlauf kann knapp unter 24 h nach dem letzten
+// enden, und die tägliche Erinnerung fiele dann einen Tag aus.
+const ERINNERUNG_AB_H = 20;
+
+export type AusweichRun = {
+  taskId: string;
+  runId: string;
+  zeit: string;
+  umgeschaltet: number;
+  gruende: string[];
+  beideTot: number;
+};
+
+export function ausweichAusAusgabe(ausgabe: unknown): { umgeschaltet: number; gruende: string[]; beideTot: number } | null {
+  if (typeof ausgabe !== "object" || ausgabe === null) return null;
+  const a = (ausgabe as Record<string, unknown>)["ausweichroute"];
+  if (typeof a !== "object" || a === null) return null;
+  const umgeschaltet = zahl(a, "umgeschaltet") ?? 0;
+  const beideTot = zahl(a, "beideTot") ?? 0;
+  if (umgeschaltet === 0 && beideTot === 0) return null;
+  const roh = (a as Record<string, unknown>)["gruende"];
+  const gruende = Array.isArray(roh) ? roh.map(String) : [];
+  return { umgeschaltet, gruende, beideTot };
+}
+
+export function ausweichMeldungFaellig(letzteMeldung: Date | null, jetzt: Date): boolean {
+  if (!letzteMeldung) return true;
+  return jetzt.getTime() - letzteMeldung.getTime() >= ERINNERUNG_AB_H * 3600_000;
+}
+
+export function baueAusweichAlarm(treffer: AusweichRun[], erinnerung: boolean): { betreff: string; text: string } {
+  const tot = treffer.some((t) => t.beideTot > 0);
+  const betreff = tot
+    ? "🚨 OpenAI und Ausweichroute ausgefallen: KI-Aufrufe scheitern"
+    : erinnerung
+      ? "🔀 Erinnerung: Ausweichroute weiter aktiv, OpenAI noch ausgefallen"
+      : "🔀 OpenAI ausgefallen, Ausweichroute aktiv";
+  const bloecke = treffer
+    .map((t) =>
+      `• ${t.taskId} (${t.zeit})\n  Run-ID: ${t.runId}\n` +
+      `  Ueber OpenRouter: ${t.umgeschaltet}x, Grund: ${[...new Set(t.gruende)].join(", ") || "-"}` +
+      (t.beideTot > 0 ? `\n  Beide Wege tot: ${t.beideTot}x` : ""))
+    .join("\n\n");
+  const was = tot
+    ? "Die Agenten laufen mit ihren Rueckfaellen weiter (Entwurf statt Antwort, Standardtext), aber ohne KI. Key oder Guthaben bei OpenAI prüfen, danach das OpenRouter-Guthaben."
+    : "Die Agenten laufen ueber OpenRouter weiter, mit demselben Modell. Key oder Guthaben bei OpenAI prüfen.";
+  const text =
+    `${was}\n\n${bloecke}\n\n` +
+    `401 = Schluessel ungueltig, 429 = Guthaben leer oder Limit, 5xx = Stoerung bei OpenAI.\n` +
+    `Solange es anhaelt, kommt hoechstens eine Erinnerung pro Tag.`;
+  return { betreff, text };
+}
+
+async function sammleAusweich(fenster: { von: Date; bis: Date }): Promise<AusweichRun[]> {
+  const seit = new Date(fenster.von.getTime() - LISTE_VORLAUF_MIN * 60_000);
+  const treffer: AusweichRun[] = [];
+
+  for await (const run of runs.list({ status: ["COMPLETED"], taskIdentifier: [...AUSWEICH_TASKS], from: seit, limit: 50 })) {
+    if (!imFenster(run.finishedAt, fenster)) continue; // schon gemeldet oder naechstes Fenster
+    let ausgabe: unknown;
+    try {
+      ausgabe = (await runs.retrieve(run.id)).output;
+    } catch (e) {
+      logger.warn("Ausgabe nicht abrufbar — Ausweichroute nicht beurteilt", {
+        runId: run.id,
+        taskId: run.taskIdentifier,
+        grund: String(e).slice(0, 200),
+      });
+      continue;
+    }
+    const a = ausweichAusAusgabe(ausgabe);
+    if (!a) continue;
+    treffer.push({
+      taskId: run.taskIdentifier,
+      runId: run.id,
+      zeit: (run.finishedAt ?? run.createdAt ?? new Date()).toLocaleString("de-DE", { timeZone: "Europe/Berlin" }),
+      ...a,
+    });
+  }
+
+  logger.log("Schritt 2b abgeschlossen", { ausweichTreffer: treffer.length });
+  return treffer;
+}
+
+/** Wann hat ein eigener Lauf zuletzt die Ausweichroute gemeldet? null = in den letzten 24 h nie. */
+async function letzteAusweichMeldung(jetzt: Date): Promise<Date | null> {
+  for await (const run of runs.list({
+    taskIdentifier: EIGENE_TASK_ID,
+    tag: AUSWEICH_TAG,
+    from: new Date(jetzt.getTime() - 24 * 3600_000),
+    limit: 1,
+  })) {
+    return run.createdAt ? new Date(run.createdAt) : null;
+  }
+  return null;
+}
+
 // ─── Schritt 3: Senden (Brevo, wie reporting.ts) ──────────────────────────────
 
 async function sendeAlarm(betreff: string, text: string): Promise<boolean> {
@@ -427,11 +535,32 @@ export const agentHealthMonitor = schedules.task({
 
     const fehler = await sammleFehler(fenster);
     const leerlauf = await sammleLeerlauf(fenster);
+    const ausweich = await sammleAusweich(fenster);
+
+    // Eigene Mail neben dem Fehler-/Leerlauf-Alarm. "Beide tot" ist ein Ausfall
+    // und geht jedes Mal raus; die reine Ausweichroute sofort, danach hoechstens
+    // einmal pro Tag. Den Tag nur setzen, wenn die Mail wirklich raus ist —
+    // sonst gaelte ein nie zugestellter Hinweis als gemeldet.
+    // Fail-open: scheitert dieser Teil, darf er den Fehler-/Leerlauf-Alarm darunter nicht mitreissen.
+    if (ausweich.length > 0) {
+      try {
+        const tot = ausweich.some((a) => a.beideTot > 0);
+        const letzte = tot ? null : await letzteAusweichMeldung(fenster.bis);
+        if (tot || ausweichMeldungFaellig(letzte, fenster.bis)) {
+          const { betreff, text } = baueAusweichAlarm(ausweich, letzte !== null);
+          if (await sendeAlarm(betreff, text)) await tags.add(AUSWEICH_TAG);
+        } else {
+          logger.log("Ausweichroute aktiv, Erinnerung heute schon raus", { letzte: letzte?.toISOString() });
+        }
+      } catch (e) {
+        logger.error("Ausweich-Meldung gescheitert", { grund: String(e).slice(0, 200) });
+      }
+    }
 
     // Decision Point: nichts gefunden → still bleiben, kein Lärm
     if (fehler.length === 0 && leerlauf.length === 0) {
       logger.log("Alles grün — kein Alarm");
-      return { status: "ok", fehler: 0, leerlauf: 0 };
+      return { status: "ok", fehler: 0, leerlauf: 0, ausweich: ausweich.length };
     }
 
     const { betreff, text } = baueAlarm(fehler, leerlauf, lookbackMin);
@@ -445,6 +574,7 @@ export const agentHealthMonitor = schedules.task({
       status: "alert",
       fehler: fehler.length,
       leerlauf: leerlauf.length,
+      ausweich: ausweich.length,
       tasks: [...fehler.map((f) => f.taskId), ...leerlauf.map((l) => l.taskId)],
     };
   },
