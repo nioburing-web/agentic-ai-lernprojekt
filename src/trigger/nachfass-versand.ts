@@ -1,7 +1,7 @@
 import { schedules, wait } from "@trigger.dev/sdk";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
-import OpenAI from "openai";
+import { kiChat, ausweichStand, setzeAusweichZurueck } from "./ki-client";
 
 // ─── Follow-up-Versand ──────────────────────────────────────────────────────────
 // Schickt EINEN einzigen Nachfass an Leads, die eine Erstmail bekommen und nach
@@ -11,9 +11,6 @@ import OpenAI from "openai";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getOpenAI() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30000 });
-}
 
 function getGoogleAuth() {
   const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
@@ -142,8 +139,7 @@ async function markiereNachgefasst(
 // ─── Follow-up-Text generieren ──────────────────────────────────────────────────
 
 async function generiereFollowup(row: QueueRow): Promise<string> {
-  const openai = getOpenAI();
-  const completion = await openai.chat.completions.create({
+  const completion = await kiChat({
     model: "gpt-4o-mini",
     temperature: 0.85,
     max_tokens: 200,
@@ -236,6 +232,7 @@ export const nachfassVersand = schedules.task({
   machine: "small-2x",
   maxDuration: 600,
   run: async () => {
+    setzeAusweichZurueck();
     console.log("=== Nachfass-Versand gestartet ===");
 
     const { sheets, sheetId } = await getQueue();
@@ -270,5 +267,6 @@ export const nachfassVersand = schedules.task({
     }
 
     console.log(`=== Nachfass-Versand fertig. ${gesendet}/${leads.length} gesendet ===`);
+    return { ausweichroute: ausweichStand() };
   },
 });

@@ -1,5 +1,5 @@
 import { task, logger } from "@trigger.dev/sdk";
-import OpenAI from "openai";
+import { kiChat, ausweichStand, setzeAusweichZurueck } from "./ki-client";
 import axios from "axios";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
@@ -46,7 +46,6 @@ function formatBerlinTime(date: Date): string {
 // ─── Funktion 1: Anfrage analysieren ─────────────────────────────────────────
 
 async function analysiereAnfrage(payload: Payload): Promise<Kategorie> {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   const anfrage =
     `Name: ${payload.name}\n` +
@@ -62,7 +61,7 @@ async function analysiereAnfrage(payload: Payload): Promise<Kategorie> {
     "Antworte NUR mit der Kategorie, ohne weitere Erklärung.";
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await kiChat({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
@@ -70,7 +69,7 @@ async function analysiereAnfrage(payload: Payload): Promise<Kategorie> {
       ],
       max_tokens: 10,
       temperature: 0,
-    });
+    }, { timeoutMs: 30000 });
 
     const kategorie = response.choices[0]?.message?.content?.trim().toUpperCase() as Kategorie;
 
@@ -95,7 +94,6 @@ async function generiereAntwort(
   _kategorie: Kategorie
 ): Promise<Antwort> {
   const betreff = `Danke für Ihre Nachricht, ${name}`;
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   const kontext =
     `Name: ${name}\n` +
@@ -114,7 +112,7 @@ async function generiereAntwort(
     "4. Keine Signatur, keine Betreffzeile, kein zusätzlicher Text";
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await kiChat({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
@@ -122,7 +120,7 @@ async function generiereAntwort(
       ],
       max_tokens: 100,
       temperature: 0.3,
-    });
+    }, { timeoutMs: 30000 });
 
     const emailText =
       response.choices[0]?.message?.content?.trim() ??
@@ -279,6 +277,7 @@ export const sofortAntwortTask = task({
     factor: 2,
   },
   run: async (payload: Payload) => {
+    setzeAusweichZurueck();
     const anfrageZeit = new Date();
     logger.log("Sofort-Antwort-Agent gestartet", { name: payload.name, email: payload.email });
 
@@ -319,6 +318,6 @@ export const sofortAntwortTask = task({
     }
 
     logger.log("Sofort-Antwort-Agent abgeschlossen", { kategorie, status });
-    return { kategorie, status };
+    return { kategorie, status, ausweichroute: ausweichStand() };
   },
 });

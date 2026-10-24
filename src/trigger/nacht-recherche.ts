@@ -7,6 +7,7 @@ import {
   betreffIstKeineFrage, regieSatzImText,
 } from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
+import { kiChat, ausweichStand, setzeAusweichZurueck } from "./ki-client";
 import {
   neuerNachfasszaehler, zaehleEntwurf, zaehleNachfass, nachfassBericht,
   type Nachfasszaehler,
@@ -1095,14 +1096,13 @@ export type Schreiber = (nachrichten: Nachricht[]) => Promise<string>;
  * Reasoning-Modell: kein temperature, das Tokenlimit zählt das Denken mit.
  */
 export function standardSchreiber(): Schreiber {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60000 });
   return async (nachrichten) => {
-    const completion = await openai.chat.completions.create({
+    const completion = await kiChat({
       model: "gpt-6-luna",
       reasoning_effort: "low",
       max_completion_tokens: 4000,
       messages: nachrichten,
-    });
+    }, { timeoutMs: 60000 });
     return completion.choices[0]?.message?.content?.trim() ?? "";
   };
 }
@@ -1472,6 +1472,7 @@ export const nachtRecherche = schedules.task({
   machine: "small-2x",
   maxDuration: 900,
   run: async () => {
+    setzeAusweichZurueck();
     console.log("=== Nacht-Recherche gestartet ===");
 
     const { sheets, sheetId } = await getQueue();
@@ -1500,7 +1501,7 @@ export const nachtRecherche = schedules.task({
       // `uebersprungen` ist der Unterschied zwischen "nichts gefunden" und "nichts
       // gesucht". Ohne dieses Feld wuerde der Health-Monitor die 0 als Leerlauf
       // melden — ein Waechter, der an ruhigen Tagen schreit, wird ignoriert.
-      return { entwuerfe: 0, kategorie: "-", status: "-", uebersprungen: grund };
+      return { entwuerfe: 0, kategorie: "-", status: "-", uebersprungen: grund, ausweichroute: ausweichStand() };
     }
 
     const { kontakte: vorhandene, betriebe: bekannt } = await ladeVorhandeneKontakte(sheets, sheetId);
@@ -1550,7 +1551,7 @@ export const nachtRecherche = schedules.task({
     const kategorie = waehleKategorie(tagImJahr);
     if (!kategorie) {
       console.log("Keine aktive Kategorie in nischen.ts — nichts zu tun.");
-      return;
+      return { ausweichroute: ausweichStand() };
     }
 
     // Lieber hier abbrechen als 30 Mails mit kaputtem Demo-Link erzeugen.
@@ -1749,6 +1750,7 @@ export const nachtRecherche = schedules.task({
       mangelhaft,
       nachfassen: bericht,
       maps,
+      ausweichroute: ausweichStand(),
     };
   },
 });

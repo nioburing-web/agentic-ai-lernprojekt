@@ -2,7 +2,7 @@ import { schedules, logger } from "@trigger.dev/sdk/v3";
 import { ImapFlow } from "imapflow";
 import { sheets as googleSheets } from "@googleapis/sheets";
 import { GoogleAuth } from "google-auth-library";
-import OpenAI from "openai";
+import { kiChat, ausweichStand, setzeAusweichZurueck } from "./ki-client";
 
 // ─── Konfiguration: Der Autonomie-Korridor ──────────────────────────────────────
 // Nios Reichweite (Entscheidung 18.06.2026):
@@ -73,10 +73,6 @@ type Lernbeispiel = {
   agentAntwort: string;
   deineAntwort: string;
 };
-
-function getOpenAI(): OpenAI {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30000 });
-}
 
 function getGoogleAuth(): GoogleAuth {
   const credentialsJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
@@ -606,8 +602,7 @@ async function markiereAlsGelesen(uid: number, client: ImapFlow): Promise<void> 
 
 export async function entscheideEmail(email: EmailData, fewShot: string = ""): Promise<Entscheidung> {
   try {
-    const openai = getOpenAI();
-    const completion = await openai.chat.completions.create({
+    const completion = await kiChat({
       model: "gpt-4o-mini",
       temperature: 0.3,
       max_tokens: 400,
@@ -619,7 +614,7 @@ export async function entscheideEmail(email: EmailData, fewShot: string = ""): P
           content: `Betreff: ${email.subject}\nVon: ${email.from}\nText: ${email.body.slice(0, 600)}`,
         },
       ],
-    });
+    }, { timeoutMs: 30000 });
     const response = completion.choices[0]?.message?.content ?? "";
     return parseEntscheidung(response);
   } catch (err) {
@@ -843,6 +838,7 @@ export const replyClassifier = schedules.task({
   },
   maxDuration: 180,
   run: async () => {
+    setzeAusweichZurueck();
     logger.log("=== Reply-Agent gestartet ===");
 
     // Schritt 1: Outreach Queue laden.
@@ -859,7 +855,7 @@ export const replyClassifier = schedules.task({
       ({ sheets, sheetId, rows: queueRows } = await ladeOutreachQueue());
     } catch (err) {
       logger.error("Google Sheets Init Fehler:", { error: String(err) });
-      return;
+      return { ausweichroute: ausweichStand() };
     }
 
     const bekannteKontakte = new Set<string>();
@@ -879,11 +875,11 @@ export const replyClassifier = schedules.task({
       logger.log(`${emails.length} Lead-Antworten geladen`);
     } catch (err) {
       logger.error("Gmail Fehler:", { error: String(err) });
-      return;
+      return { ausweichroute: ausweichStand() };
     }
     if (emails.length === 0 && massenpost.length === 0) {
       logger.log("Keine neuen E-Mails. Fertig.");
-      return;
+      return { ausweichroute: ausweichStand() };
     }
 
     // Schritt 2b: Korrekturen wegsichern + Few-Shot bauen
@@ -1029,5 +1025,6 @@ export const replyClassifier = schedules.task({
     logger.log(
       `=== Fertig. Termine: ${termineGesendet}, Entwürfe: ${entwuerfe}, Status: ${nurStatus}, übersprungen: ${unbekannt} ===`
     );
+    return { ausweichroute: ausweichStand() };
   },
 });
