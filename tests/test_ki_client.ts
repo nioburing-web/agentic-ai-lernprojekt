@@ -8,8 +8,10 @@
 // an dasselbe Modell über OpenRouter — aber nur bei echten Ausfällen, nie bei
 // einem kaputten Prompt (400), sonst bezahlt man einen Bug doppelt.
 
+import OpenAI from "openai";
 import {
   istAusfall, ausweichGrund, fuerOpenRouter, kiChat, ausweichStand, setzeAusweichZurueck,
+  direktWiederholungen, AUSWEICH_WIEDERHOLUNGEN,
 } from "../src/trigger/ki-client";
 import type { KiKlient } from "../src/trigger/ki-client";
 
@@ -42,8 +44,17 @@ async function main(): Promise<void> {
   for (const s of [401, 403, 429, 500, 503]) check(istAusfall({ status: s }), `Status ${s} ist Ausfall`);
   check(istAusfall({ code: "ETIMEDOUT" }), "ETIMEDOUT ist Ausfall");
   check(istAusfall(new Error("Request timed out.")), "Timeout-Text ist Ausfall");
-  const verbindung = new Error("Connection error."); verbindung.name = "APIConnectionError";
-  check(istAusfall(verbindung), "APIConnectionError ist Ausfall");
+  // Echte SDK-Klassen, keine Attrappe: das openai-SDK setzt `name` nicht, die
+  // Klasse erkennt man nur über instanceof (Review 24.10.).
+  check(istAusfall(new OpenAI.APIConnectionError({ cause: new Error("ECONNRESET") })), "echter APIConnectionError ist Ausfall");
+  check(istAusfall(new OpenAI.APIConnectionTimeoutError()), "echter APIConnectionTimeoutError ist Ausfall");
+
+  // ─── SDK-Wiederholungen ──────────────────────────────────────────────────
+  // Mit Ausweiche wiederholt der Direktweg nicht selbst — sonst kostet ein
+  // hängendes OpenAI 3x den Timeout, bevor OpenRouter überhaupt gefragt wird.
+  check(direktWiederholungen(true) === 0, "mit Ausweiche: Direktweg 0 SDK-Wiederholungen");
+  check(direktWiederholungen(false) === 2, "ohne Ausweiche: SDK-Standard 2 wie heute");
+  check(AUSWEICH_WIEDERHOLUNGEN === 1, "Ausweiche: 1 SDK-Wiederholung");
   for (const s of [400, 404]) check(!istAusfall({ status: s }), `Status ${s} ist KEIN Ausfall`);
   check(!istAusfall(new Error("Ungültige Kategorie")), "fachlicher Fehler ist KEIN Ausfall");
   check(ausweichGrund({ status: 401 }) === "401", "Grund für 401 ist \"401\"");

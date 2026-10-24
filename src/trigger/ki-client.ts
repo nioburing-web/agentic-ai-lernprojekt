@@ -22,7 +22,9 @@
  * Der Zustand gilt pro Lauf. Trigger.dev kann einen Prozess für den nächsten
  * Lauf wiederverwenden — deshalb ruft jeder Task am Anfang von run()
  * setzeAusweichZurueck(), sonst schickt der Vorlauf einen gesunden Lauf direkt
- * zu OpenRouter.
+ * zu OpenRouter. Bekannte Grenze: Liefen je zwei Läufe gleichzeitig im selben
+ * Prozess, teilten sie diesen Zustand. Trigger.dev v4 fährt einen Lauf pro
+ * Prozess (Review 24.10.).
  */
 
 import OpenAI from "openai";
@@ -42,8 +44,16 @@ const PROVIDER = { only: ["openai"], allow_fallbacks: false };
 const AUSFALL_CODES = new Set([
   "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "EPIPE", "ENOTFOUND",
 ]);
-/** Fehlerklassen des openai-SDK, die keinen Status tragen. */
-const AUSFALL_NAMEN = new Set(["APIConnectionError", "APIConnectionTimeoutError"]);
+/**
+ * SDK-eigene Wiederholungen. Mit Ausweiche wiederholt der Direktweg nicht selbst:
+ * bei einem hängenden OpenAI kostete sonst jeder Aufruf 3x den Timeout, bevor
+ * OpenRouter gefragt wird — in nacht-recherche (60 s, maxDuration 900) drei
+ * Minuten pro Entwurf. Ohne Ausweiche bleibt es beim SDK-Standard wie bisher.
+ */
+export const AUSWEICH_WIEDERHOLUNGEN = 1;
+export function direktWiederholungen(hatAusweich: boolean): number {
+  return hatAusweich ? 0 : 2;
+}
 
 let umgeschaltet = 0;
 let gruende: string[] = [];
@@ -62,7 +72,9 @@ export function istAusfall(fehler: unknown): boolean {
   if (typeof fehler !== "object" || fehler === null) return false;
   const f = fehler as { code?: unknown; name?: unknown; message?: unknown };
   if (typeof f.code === "string" && AUSFALL_CODES.has(f.code)) return true;
-  if (typeof f.name === "string" && AUSFALL_NAMEN.has(f.name)) return true;
+  // Das SDK setzt `name` nicht — nur instanceof erkennt die Klasse (deckt die
+  // Timeout-Unterklasse mit ab).
+  if (fehler instanceof OpenAI.APIConnectionError) return true;
   return typeof f.message === "string" && /timed? ?out/i.test(f.message);
 }
 
@@ -79,14 +91,14 @@ export function fuerOpenRouter(params: KiParams): KiParams & { provider: typeof 
   return { ...params, model: `openai/${params.model}`, provider: { ...PROVIDER, only: [...PROVIDER.only] } };
 }
 
-function standardDirekt(timeoutMs: number): KiKlient {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: timeoutMs });
+function standardDirekt(timeoutMs: number, hatAusweich: boolean): KiKlient {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: timeoutMs, maxRetries: direktWiederholungen(hatAusweich) });
 }
 
 function standardAusweich(timeoutMs: number): KiKlient | null {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
-  return new OpenAI({ apiKey, baseURL: OPENROUTER_URL, timeout: timeoutMs });
+  return new OpenAI({ apiKey, baseURL: OPENROUTER_URL, timeout: timeoutMs, maxRetries: AUSWEICH_WIEDERHOLUNGEN });
 }
 
 /**
@@ -114,7 +126,7 @@ export async function kiChat(
     }
   }
 
-  const direkt = opt.direkt ?? standardDirekt(timeoutMs);
+  const direkt = opt.direkt ?? standardDirekt(timeoutMs, ausweich !== null);
   try {
     return await direkt.chat.completions.create(params);
   } catch (fehler) {
