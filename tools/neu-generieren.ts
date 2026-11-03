@@ -55,7 +55,7 @@ import { oeffnerIstFloskel, nameFuerMail } from "../src/trigger/entwurf-qualitae
 import { anredeIstGemischt } from "../src/trigger/anrede";
 import { KATEGORIEN } from "../src/trigger/nischen";
 import type { Kategorie, Nische } from "../src/trigger/nischen";
-import { regelBefunde, zeilenAusArgument, zeilenZumNeuSchreiben, betreffVergleichFuer } from "./freigabe-pruefung";
+import { regelBefunde, zeilenAusArgument, zeilenZumNeuSchreiben, betreffVergleichFuer, websiteAusEmail } from "./freigabe-pruefung";
 
 const QUEUE_TAB = "Outreach Queue";
 const MIN_WEBSITE_TEXT = 300; // gleiches Quality-Gate wie in nacht-recherche
@@ -90,12 +90,6 @@ function findeNische(nischenName: string): { k: Kategorie; n: Nische } | null {
   return null;
 }
 
-/** Die Website, von der die Adresse stammt. Kein Maps-Aufruf, nur die Domain. */
-function websiteAusEmail(email: string): string | null {
-  const domain = email.split("@")[1]?.trim().toLowerCase();
-  if (!domain || !domain.includes(".")) return null;
-  return `https://${domain}`;
-}
 
 /** Der Demo-Link steht bereits im alten Entwurf — übernehmen statt neu bauen. */
 function linkAusEntwurf(entwurf: string, demoId: string): string | null {
@@ -322,7 +316,7 @@ async function main(): Promise<void> {
   for (const [idx, z] of offen.entries()) {
     const website = websiteAusEmail(z.email);
     if (!website) {
-      console.log(`[--] ${z.nr} ${z.firma}: keine Domain aus "${z.email}"`);
+      console.log(`[--] ${z.nr} ${z.firma}: keine eigene Domain aus "${z.email}" (Freemail oder kaputt) – alte Fassung bleibt`);
       unveraendert++;
       continue;
     }

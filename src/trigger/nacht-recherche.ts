@@ -838,6 +838,12 @@ const FREIMAIL_PROVIDER = [
   "vodafone.de", "bluewin.ch", "a1.net",
 ];
 
+// Seit dem 03.11.2026 auch von tools/neu-generieren.ts benutzt: dort ist eine
+// Freemail-Domain keine Website, sondern die Startseite des Anbieters.
+export function istFreemailDomain(domain: string): boolean {
+  return FREIMAIL_PROVIDER.includes(domain.trim().toLowerCase());
+}
+
 // Zweiteilige oeffentliche Suffixe. Ohne die wuerde `firma.co.uk` auf `co.uk`
 // zusammenfallen und jede britische Domain zur selben Firma gehoeren.
 const ZWEITEILIGE_SUFFIXE = ["co.uk", "org.uk", "ac.uk", "com.au", "co.nz", "com.br"];

@@ -11,6 +11,7 @@ import {
   betreffIstBrauchbar,
   vorlageIstAbgeschrieben,
   vorlagenFuer,
+  istFreemailDomain,
 } from "../src/trigger/nacht-recherche";
 import { oeffnerIstFloskel, betreffzeileImText, nameFuerMail, regieSatzImText, betreffIstKoeder, betreffIstKeineFrage, noShowAufhaenger } from "../src/trigger/entwurf-qualitaet";
 import { KATEGORIEN } from "../src/trigger/nischen";
@@ -240,4 +241,21 @@ export function pruefEingabeAusZeile(r: readonly unknown[]): {
 } {
   const feld = (i: number): string => String(r[i] ?? "");
   return { name: feld(1), stadt: feld(2), entwurf: feld(4), betreff: feld(8), nische: feld(19) };
+}
+
+/**
+ * Die Website, von der eine Adresse stammt, für tools/neu-generieren.ts.
+ * Kein Maps-Aufruf, nur die Domain.
+ *
+ * Seit dem 03.11.2026 liefert eine Freemail-Adresse keine Website. Vorher holte
+ * neu-generieren für `…@gmail.com` die Google-Startseite, und das Modell schrieb
+ * vier Entwürfe über "die Gmail-Anmeldeseite" oder "GMX-Schlagzeilen statt
+ * Praxisinfos". Kein Regelbefund fing das, erst die Fit-Lesung. Ohne Website
+ * bleibt die alte Fassung stehen, wie bei zu wenig Website-Text.
+ */
+export function websiteAusEmail(email: string): string | null {
+  const domain = email.split("@")[1]?.trim().toLowerCase();
+  if (!domain || !domain.includes(".")) return null;
+  if (istFreemailDomain(domain)) return null;
+  return `https://${domain}`;
 }
