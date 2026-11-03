@@ -7,7 +7,7 @@
 // die Erkennung dort an, meldet die Probe Rot bei einer gesunden Demo und
 // niemand traut ihr.
 
-import { absageBefund, alleFaelle } from "../tools/demo-probe";
+import { absageBefund, alleFaelle, anredeBefund, ausweichBefund } from "../tools/demo-probe";
 
 let bestanden = 0;
 let fehlgeschlagen = 0;
@@ -50,6 +50,39 @@ const gute: [string, string][] = [
 for (const [fall, text] of gute) {
   check(absageBefund(text) === null, `keine Absage: ${fall}`);
 }
+
+// Ausweichen statt Abwinken (03.11.2026). Eine Fahrschule schrieb am 26.10.:
+// "Eure K.I. hat es in der DEMO leider direkt verkackt." Die Probe war 12/12
+// grün, denn "Das kläre ich kurz mit dem Team" ist keine Absage. Für den
+// Inhaber ist es trotzdem ein Fehlschlag: er hat eine Faktenfrage gestellt
+// und keine Antwort bekommen. Die Fälle sind wörtliche Live-Antworten vom 03.11.
+const ausweichend: [string, string, string][] = [
+  ["Theoriekurs 03.11.", "Wann startet der nächste Theoriekurs?", "Das kläre ich kurz mit dem Team und melde mich. Gerne kann ich aber schon mal eine Anfrage für Sie aufnehmen, damit wir Sie zu den nächsten Kursstartdaten kontaktieren können. Wie heißen Sie denn, und wann würde Ihnen ein Kurs zeitlich passen?"],
+  ["Fahrschule 02.10.", "Wann startet der nächste Theoriekurs?", "Das kläre ich kurz mit dem Team und melde mich. Ich muss ehrlich sagen: Das ist hier eine Beispiel-Demo, und ich kenne die genauen Kurstermine des Betriebs noch nicht. Im echten Einsatz hätte ich diese Informationen für Sie parat."],
+  ["Kosmetik Preis", "Was kostet eine Gesichtsbehandlung?", "Das ist eine gute Frage! Dies ist allerdings eine Demo-Version, und für diesen Beispiel-Betrieb sind keine konkreten Preise hinterlegt. Im echten Einsatz würde der Assistent dir hier die genauen Preise nennen können."],
+  ["Fußpflege frei", "Habt ihr nächste Woche einen Termin frei?", "Gerne helfe ich dir, einen Termin zu vereinbaren! Um das mit unserem Team zu klären, brauche ich noch ein paar Angaben von dir: Was ist dein Anliegen — was möchtest du bei uns machen?"],
+];
+for (const [fall, satz, text] of ausweichend) {
+  check(ausweichBefund(satz, text) !== null, `Ausweichen erkannt: ${fall}`);
+}
+
+const beantwortet: [string, string, string][] = [
+  ["Samstag", "Habt ihr Samstag noch was frei?", "Gerne! Wir haben samstags von 10:00 bis 14:00 Uhr geöffnet. Ob wir noch einen freien Termin für Sie haben, kläre ich gerne mit dem Team."],
+  ["Theoriekurs mit Termin", "Wann startet der nächste Theoriekurs?", "Der nächste Theoriekurs startet am Montag um 18:00 Uhr, als Beispiel-Termin. Soll ich Sie dafür vormerken?"],
+  ["Preis ab", "Was kostet eine Gesichtsbehandlung?", "Eine klassische Gesichtsbehandlung kostet bei uns ab 59 €, unverbindlich. Möchten Sie einen Termin?"],
+  // Keine Faktenfrage: hier ist Aufnehmen die richtige Antwort, kein Ausweichen.
+  ["Heizung", "Bei mir tropft die Heizung.", "Das tut mir leid! Ich nehme das auf und unser Team kümmert sich darum. Wie dringend ist es?"],
+  ["Kontrolltermin", "Ich hätte gern einen Kontrolltermin.", "Gerne! Ich nehme Ihren Kontrolltermin gerne auf. Wie heißen Sie?"],
+  ["Wohnung", "Ist die Wohnung noch verfügbar?", "Gerne helfe ich Ihnen weiter! Welche Wohnung interessiert Sie denn? Können Sie mir die Adresse oder eine Objektnummer geben?"],
+];
+for (const [fall, satz, text] of beantwortet) {
+  check(ausweichBefund(satz, text) === null, `beantwortet: ${fall}`);
+}
+
+// Die Fahrschule bemängelte auch, dass die Demo zwischen Sie und du springt.
+check(anredeBefund("Wie heißen Sie denn? Dann melde ich mich bei dir.") !== null, "Anrede gemischt erkannt");
+check(anredeBefund("Wie heißen Sie denn? Dann melden wir uns bei Ihnen.") === null, "durchgehend Sie ok");
+check(anredeBefund("Wie heißt du? Dann melden wir uns bei dir.") === null, "durchgehend du ok");
 
 // Die Probe muss alle aktiven Sätze aus nischen.ts nehmen, nicht eine Auswahl.
 const faelle = alleFaelle();

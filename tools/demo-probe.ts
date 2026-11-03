@@ -20,7 +20,8 @@
  *   npx tsx tools/demo-probe.ts --runden=2               # jeder Satz zweimal
  *   npx tsx tools/demo-probe.ts --nur=kanzlei --zeigen   # eine Nische, Antworten voll
  *
- * Exit 1, sobald ein Satz abgewunken wird oder die Rueckfallantwort kommt.
+ * Exit 1, sobald ein Satz abgewunken wird, die Rueckfallantwort kommt, eine
+ * Faktenfrage ohne konkrete Angabe ausgewichen wird oder die Anrede wechselt.
  */
 
 import { pathToFileURL } from "node:url";
@@ -54,6 +55,31 @@ export function absageBefund(antwort: string): string | null {
     if (treffer) return `winkt ab: "${treffer[0]}"`;
   }
   return null;
+}
+
+/**
+ * Ausweichen ist das zweite Durchfallen (03.11.2026). Eine Fahrschule schrieb:
+ * "Eure K.I. hat es in der DEMO leider direkt verkackt." Auf "Wann startet der
+ * nächste Theoriekurs?" kam "Das kläre ich kurz mit dem Team" — keine Absage,
+ * also grün, für den Inhaber aber keine Antwort. Eine Faktenfrage (wann, was
+ * kostet, ist etwas frei) gilt deshalb erst als beantwortet, wenn eine konkrete
+ * Uhrzeit, ein Datum oder ein Preis drinsteht. Alle anderen Sätze ("Bei mir
+ * tropft die Heizung") darf die Demo aufnehmen statt beantworten.
+ */
+const FAKTENFRAGE = /^(?:wann\b|was kostet|wie viel|wie teuer)|\bfrei\?$/i;
+const KONKRET = [/\b\d{1,2}[:.]\d{2}\b/, /\d+\s?(?:€|euro)/i, /\b\d{1,2}\.\s?\d{1,2}\./];
+
+export function ausweichBefund(satz: string, antwort: string): string | null {
+  if (!FAKTENFRAGE.test(satz.trim())) return null;
+  if (KONKRET.some((m) => m.test(antwort))) return null;
+  return "weicht aus: Faktenfrage ohne Uhrzeit, Datum oder Preis";
+}
+
+/** Die Fahrschule bemängelte auch den Wechsel zwischen Sie und du. */
+export function anredeBefund(antwort: string): string | null {
+  const du = /\b(?:du|dir|dich|dein\w*)\b/i.test(antwort);
+  const sie = /\b(?:Ihnen|Ihr(?:e|en|em|er|es)?)\b/.test(antwort) || /\b(?:heißen|haben|möchten|können) Sie\b/.test(antwort);
+  return du && sie ? "Anrede gemischt (Sie und du in einer Antwort)" : null;
 }
 
 type Fall = { profil: DemoProfil; nische: string; satz: string };
@@ -90,7 +116,7 @@ async function main(): Promise<void> {
       const antwort = await frage(basis, f).catch((e: Error) => `FEHLER ${e.message}`);
       const befund = antwort.startsWith("HTTP ") || antwort.startsWith("FEHLER ")
         ? antwort
-        : absageBefund(antwort);
+        : absageBefund(antwort) ?? ausweichBefund(f.satz, antwort) ?? anredeBefund(antwort);
       if (befund) rot++;
       console.log(`${befund ? "[ROT] " : "[OK]  "} ${f.nische.padEnd(22)} ${f.satz}`);
       if (befund) console.log(`       ${befund}`);
