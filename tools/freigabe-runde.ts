@@ -60,6 +60,19 @@ const FIT_GRUND =
   (process.argv.find((a) => a.startsWith("--grund=")) ?? "").split("=").slice(1).join("=") ||
   "beim Lesen als unpassend beurteilt";
 
+// Das Noch-nicht eines Menschen (03.11.2026). Der Entwurf passt, aber etwas
+// ausserhalb davon ist nicht bereit — am 03.11. die Demo, die auf den Fahrschul-
+// Beispielsatz keinen Kurstermin nennt. Vorher gab es nur Verwerfen oder
+// Freigeben, also den Lead verlieren oder sehenden Auges rausschicken.
+// Die Zeile bleibt auf PRUEFEN und kommt in der nächsten Runde wieder.
+//   --zurueckhalten=2536,2537  --halte-grund="Demo nennt keinen Kurstermin"
+const HALTEN = zeilenAusArgument(
+  (process.argv.find((a) => a.startsWith("--zurueckhalten=")) ?? "").split("=").slice(1).join("=")
+);
+const HALTE_GRUND =
+  (process.argv.find((a) => a.startsWith("--halte-grund=")) ?? "").split("=").slice(1).join("=") ||
+  "beim Lesen zurückgehalten";
+
 // Läuft außerhalb von Trigger.dev, also kommt die Umgebung aus der .env des Repos.
 function ladeEnv(): void {
   if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) return;
@@ -130,6 +143,11 @@ async function main(): Promise<void> {
       updates.push({ range: `${QUEUE_TAB}!J${z.nummer}`, values: [[`Freigabe-Runde: Fit-Urteil — ${FIT_GRUND}`]] });
       befunde.set(z.nummer, liste);
       continue;
+    }
+
+    // Ein offener Befund sperrt die Zeile für --freigeben, ohne ins Sheet zu schreiben.
+    if (HALTEN.has(z.nummer)) {
+      liste.push({ art: "prüfen", hinweis: `zurückgehalten: ${HALTE_GRUND}` });
     }
 
     const adressGrund = adresseIstUnbrauchbar(kontakt);
