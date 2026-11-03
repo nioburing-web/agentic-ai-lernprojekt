@@ -4,7 +4,7 @@ import { vereinheitlicheAnrede, anredeIstGemischt } from "./anrede";
 import {
   nameFuerMail, oeffnerIstFloskel, nameIstBrauchbar,
   betreffzeileImText, ohneBetreffKopfzeile, betreffBrichtKleinschreibung,
-  betreffIstKeineFrage, regieSatzImText,
+  betreffIstKeineFrage, regieSatzImText, betreffVergleichFuer,
 } from "./entwurf-qualitaet";
 import { mitWiederholung } from "./wiederholung";
 import { kiChat, ausweichStand, setzeAusweichZurueck } from "./ki-client";
@@ -1043,22 +1043,33 @@ export function zerlegeAntwort(raw: string): { betreff: string; inhalt: string }
 // Laufs. Das Modell KANN Wiederholung also nicht selbst vermeiden — "formuliere
 // frisch" im Prompt reicht prinzipiell nicht. Deshalb bekommt es die zuletzt
 // verwendeten Betreffe explizit als verbraucht mitgegeben.
-async function ladeLetzteBetreffe(
+//
+// Seit dem 03.11.2026 sind Prüfliste und Prompt-Liste getrennt. Bis dahin lud
+// der Lauf nur die letzten 40 Betreffe und prüfte auch nur gegen sie. Die
+// Freigabe-Runde prüft gegen alles, was draußen ist (`betreffVergleichFuer`).
+// Ergebnis: 37 von 51 PRUEFEN-Zeilen hingen am 03.11. an "Betreff doppelt",
+// und über die letzten 400 Zeilen waren 38 Betreffe schon einmal verschickt,
+// von denen der Erzeuger 2 sehen konnte. Er fasste nie nach, weil er die
+// Dublette nicht kannte. Jetzt prüft er gegen dieselbe Liste wie die Runde;
+// das Modell sieht davon nur die letzten 40, sonst wird der Prompt zur Liste.
+export function verbrauchteBetreffeAusQueue(rohzeilen: readonly (readonly unknown[])[]): string[] {
+  return betreffVergleichFuer(rohzeilen, rohzeilen.length + 1);
+}
+
+export function betreffeFuerPrompt(verbrauchte: readonly string[], anzahl = 40): string[] {
+  return verbrauchte.slice(-anzahl);
+}
+
+async function ladeVerbrauchteBetreffe(
   sheets: ReturnType<typeof googleSheets>,
   sheetId: string,
-  anzahl = 40
 ): Promise<string[]> {
   const response = await mitWiederholung("bisherige Betreffe laden", () =>
     sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: `${QUEUE_TAB}!I:I`,
+      range: `${QUEUE_TAB}!A:I`,
     }));
-  const rows = response.data.values ?? [];
-  const betreffe = rows
-    .slice(1)
-    .map((row) => String(row?.[0] ?? "").trim())
-    .filter((b) => b.length > 0);
-  return betreffe.slice(-anzahl);
+  return verbrauchteBetreffeAusQueue(response.data.values ?? []);
 }
 
 export type EntwurfKontext = {
@@ -1202,7 +1213,7 @@ Blickwinkel für DIESEN Betreff (verbindlich): ${betreffAngle.anweisung}
 - Der Betreff darf das Wort "Anruf", "anrufen" oder "Telefon" NICHT enthalten. Auch nicht "verpasst". Das Thema gehört in den Mailtext, nicht in die Betreffzeile.
 - Kein generisches "Interesse an…", "Idee für…", "Frage zu…". Dieselben verbotenen Marketing-Wörter wie oben gelten auch hier.
 - Der Betreff muss auch für einen Außenstehenden verständlich klingen — KEIN hyper-spezifischer Nischenbegriff von ihrer Seite, der aus dem Kontext gerissen seltsam wirkt.
-${verbrauchteBetreffe.length > 0 ? `- VERBRAUCHT — diese Betreffe wurden bereits an andere Betriebe geschickt. Formuliere etwas erkennbar anderes, nicht bloß umgestellt:\n${verbrauchteBetreffe.map((b) => `  · ${b}`).join("\n")}\n` : ""}
+${verbrauchteBetreffe.length > 0 ? `- VERBRAUCHT — diese Betreffe wurden bereits an andere Betriebe geschickt. Formuliere etwas erkennbar anderes, nicht bloß umgestellt:\n${betreffeFuerPrompt(verbrauchteBetreffe).map((b) => `  · ${b}`).join("\n")}\n` : ""}
 Format:
 BETREFF: <betreff>
 EMAIL: <email-text>`,
@@ -1511,7 +1522,7 @@ export const nachtRecherche = schedules.task({
     const maps = { detailsAbrufe: 0, bekanntVorDetails: 0, nameUnbrauchbarVorDetails: 0 };
     // Betreff-Historie: verhindert, dass Nacht für Nacht dieselben Formulierungen
     // rausgehen. Wächst im Lauf mit jedem neuen Betreff weiter.
-    const verbrauchteBetreffe = await ladeLetzteBetreffe(sheets, sheetId);
+    const verbrauchteBetreffe = await ladeVerbrauchteBetreffe(sheets, sheetId);
     let betreffIndex = 0;
     console.log(`${verbrauchteBetreffe.length} bisherige Betreffe geladen (werden als verbraucht behandelt)`);
 

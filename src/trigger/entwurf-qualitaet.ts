@@ -538,3 +538,41 @@ export function noShowAufhaenger(inhalt: string): string | null {
   const treffer = (inhalt ?? "").match(NO_SHOW);
   return treffer ? treffer[0] : null;
 }
+
+/**
+ * Die Betreffe, gegen die eine Zeile als "verbraucht" geprüft wird.
+ *
+ * Warum es das gibt (21.09.2026): freigabe-runde.ts, lesefassung.ts und
+ * neu-generieren.ts bauten diese Liste je selbst, und alle drei zählten nur
+ * GESENDET/NACHGEFASST. Zwei offene Zeilen derselben Nacht mit wortgleichem
+ * Betreff (Zeilen 1814/1819) sahen sich so nie gegenseitig und wären beide
+ * freigegeben worden — obwohl nacht-recherche die zweite selbst als
+ * "Betreff unbrauchbar" auf PRUEFEN gesetzt hatte. Gefunden erst beim Lesen.
+ *
+ * Gezählt wird, was draussen ist oder gleich rausgeht: verschickte Zeilen
+ * überall, offene (PRUEFEN, DRAFT) nur **vor** der geprüften Zeile. Das ist
+ * dieselbe Reihenfolge wie in nacht-recherche, die jeden Betreff während des
+ * Laufs an die Liste hängt: die erste Zeile einer Dublette bleibt frei, erst
+ * die zweite wird gesperrt. Gegen alle offenen Zeilen geprüft, sperrten sich
+ * beide gegenseitig — und die Zeile selbst wäre ihr eigenes Duplikat.
+ * VERWORFEN zählt nicht, die Zeile geht nie raus.
+ *
+ * Seit dem 03.11.2026 hier statt in tools/freigabe-pruefung.ts: nacht-recherche
+ * prüfte nur gegen die letzten 40 Betreffe und hielt für frisch, was vor Wochen
+ * verschickt war (38 Dubletten in 400 Zeilen, 2 davon für den Erzeuger sichtbar).
+ *
+ * `nummer` ist die Sheet-Zeile (Index 0 = Kopfzeile = Zeile 1).
+ */
+export function betreffVergleichFuer(rohzeilen: readonly (readonly unknown[])[], nummer: number): string[] {
+  const out: string[] = [];
+  for (let i = 1; i < rohzeilen.length; i++) {
+    const r = rohzeilen[i] ?? [];
+    const status = String(r[5] ?? "").trim();
+    const betreff = String(r[8] ?? "").trim();
+    if (!betreff) continue;
+    const verschickt = status === "GESENDET" || status.startsWith("NACHGEFASST");
+    const offenDavor = (status === "PRUEFEN" || status === "DRAFT") && i + 1 < nummer;
+    if (verschickt || offenDavor) out.push(betreff);
+  }
+  return out;
+}
